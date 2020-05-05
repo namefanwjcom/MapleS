@@ -125,6 +125,18 @@ Proof.
   constructor. auto. auto.
 Qed.
 
+Fixpoint mfold_left {A B: Type} (f: A -> B -> res A) (l: list B) (a: A) : res A :=
+  match l with
+  | nil => OK a
+  | b :: l' => do a' <- f a b; mfold_left f l' a'
+  end.
+
+Fixpoint mfold_right {A B: Type} (f: B -> A -> res A) (l: list B) (a: A) : res A :=
+  match l with
+  | nil => OK a
+  | b :: l' => do a' <- mfold_right f l' a; f b a'
+  end.
+
 (** * Reasoning over monadic computations *)
 
 (** The [monadInv H] tactic below simplifies hypotheses of the form
@@ -164,7 +176,7 @@ Ltac monadInv1 H :=
   | (match ?X with left _ => _ | right _ => assertion_failed end = OK _) =>
       destruct X; [try (monadInv1 H) | discriminate]
   | (match (negb ?X) with true => _ | false => assertion_failed end = OK _) =>
-      destruct X as [] eqn:?; simpl negb in H; [discriminate | try (monadInv1 H)]
+      destruct X as [] eqn:?; [discriminate | try (monadInv1 H)]
   | (match ?X with true => _ | false => assertion_failed end = OK _) =>
       destruct X as [] eqn:?; [try (monadInv1 H) | discriminate]
   | (mmap ?F ?L = OK ?M) =>
