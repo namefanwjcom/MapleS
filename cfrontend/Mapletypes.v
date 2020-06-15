@@ -96,6 +96,7 @@ Inductive prim_type : Type :=
   | PTvoid: prim_type                                    (**r the [void] type *)
   | PTint: intsize -> signedness -> prim_type    (**r integer types *)
   | PTbool: prim_type
+  | PTagg: prim_type
   | PTptr: prim_type
   | PTref: prim_type
   | PTaddr: addrsize -> prim_type              (**r address types *)
@@ -129,6 +130,11 @@ Lemma intsize_eq: forall (s1 s2: intsize), {s1=s2} + {s1<>s2}.
 Proof.
   decide equality.
 Defined.
+
+Lemma prim_type_eq: forall (pt1 pt2: prim_type), {pt1=pt2} + {pt1<>pt2}.
+Proof.
+  intros. repeat (decide equality).
+Qed.
 
 Lemma mytype_eq: forall (ty1 ty2: mytype), {ty1=ty2} + {ty1<>ty2}
 with mytypelist_eq: forall (tyl1 tyl2: mytypelist), {tyl1=tyl2} + {tyl1<>tyl2}.
@@ -164,6 +170,12 @@ with typelist_to_mytypelist (e: PTree.t mytype) (tl: typelist) : res mytypelist 
        | Tnil => OK MTnil
        | Tcons ty tl' => do mt <- type_to_mytype e ty; do mtl' <- typelist_to_mytypelist e tl'; OK (MTcons mt mtl')
        end.
+
+Fixpoint listtype_to_listmytype (e: PTree.t mytype) (tl: list type) : res (list mytype) :=
+  match tl with
+  | nil => OK nil
+  | cons ty tl' => do mt <- type_to_mytype e ty; do mtl' <- listtype_to_listmytype e tl'; OK (cons mt mtl')
+  end.
 
 Definition add_type (e: PTree.t mytype) (idty: ident * type) : res (PTree.t mytype) :=
   let (id, ty) := idty in
@@ -329,6 +341,9 @@ Record composite : Type := {
   co_alignof: Z;
   co_rank: nat;
   co_maxfield: N;
+  co_depth: N;
+  co_superclasses: list ident;
+  co_superinterfaces: list ident;
   co_sizeof_pos: co_sizeof >= 0;
   co_alignof_two_p: exists n, co_alignof = two_power_nat n;
   co_sizeof_alignof: (co_alignof | co_sizeof);
@@ -337,40 +352,45 @@ Record composite : Type := {
 Definition composite_env : Type := PTree.t composite.
 
 (** * Operations over types *)
-(*
-(** ** Conversions *)
 
-Definition type_int32s := Tint I32 Signed noattr.
-Definition type_bool := Tint IBool Signed noattr.
+(** ** Conversions *)
 
 (** The usual unary conversion.  Promotes small integer types to [signed int32]
   and degrades array types and function types to pointer types.
   Attributes are erased. *)
 
-Definition typeconv (ty: type) : type :=
-  match ty with
-  | Tint (I8 | I16 | IBool) _ _ => Tint I32 Signed noattr
-  | Tarray t sz a       => Tpointer t noattr
-  | Tfunction _ _ _     => Tpointer ty noattr
-  | _                   => remove_attributes ty
+Definition mytypeconv (mt: mytype) : mytype :=
+  match mt with
+  | MTprim pt =>
+    match pt with
+    | PTint (I8 | I16) _ | PTbool => MTprim (PTint I32 Signed)
+    | _ => MTprim pt
+    end
+  | MTarray mt' sz => MTpointer mt'
+  | MTfunction _ _ => MTpointer mt
+  | _ => mt
   end.
 
 (** Default conversion for arguments to an unprototyped or variadic function.
   Like [typeconv] but also converts single floats to double floats. *)
 
-Definition default_argument_conversion (ty: type) : type :=
-  match ty with
-  | Tint (I8 | I16 | IBool) _ _ => Tint I32 Signed noattr
-  | Tfloat _ _          => Tfloat F64 noattr
-  | Tarray t sz a       => Tpointer t noattr
-  | Tfunction _ _ _     => Tpointer ty noattr
-  | _                   => remove_attributes ty
+Definition default_argument_conversion (mt: mytype) : mytype :=
+  match mt with
+  | MTprim pt =>
+    match pt with
+    | PTint (I8 | I16) _ => MTprim (PTint I32 Signed)
+    | PTfloat F32 => MTprim (PTfloat F64)
+    | _ => MTprim pt
+    end
+  | MTarray mt' sz => MTpointer mt'
+  | MTfunction _ _ => MTpointer mt
+  | _ => mt
   end.
- *)
 
 Section Type_properties.
 
 Variable ce: composite_env.
+
 (** ** Complete types *)
 
 (** A type is complete if it fully describes an object.
@@ -444,6 +464,64 @@ Fixpoint check_complete' (te : PTree.t mytype) (id : positive) : res (PTree.t my
 Definition check_complete (te : PTree.t mytype) : res (PTree.t mytype) :=
   check_complete' te 1.
 
+(** ** Depth of composite *)
+
+Definition depthof_id (id: ident) : N :=
+  match ce ! id with
+  | Some co => co_depth co
+  | None => 0
+  end.
+
+Fixpoint maxdepthof_idlist (l: list ident) : N :=
+  match l with
+  | nil => 0
+  | id :: l' => N.max (depthof_id id) (maxdepthof_idlist l')
+  end.
+
+Definition depthof_composite (mcd: mycomposite_definition) : N :=
+  match mcd with
+  | MCDstruct l => 0
+  | MCDunion l => 0
+  | MCDclass (Some pid) li l1 l2 => N.succ (N.max (depthof_id pid) (maxdepthof_idlist li))
+  | MCDclass None li l1 l2 => N.succ (maxdepthof_idlist li)
+  | MCDinterface li l1 l2 => N.succ (maxdepthof_idlist li)
+  end.
+
+Definition superclasses_id (id: ident) : list ident :=
+  match ce ! id with
+  | Some co => nodup ident_eq (co_superclasses co)
+  | None => nil
+  end.
+
+Definition superinterfaces_id (id: ident) : list ident :=
+  match ce ! id with
+  | Some co => nodup ident_eq (co_superinterfaces co)
+  | None => nil
+  end.
+
+Fixpoint superinterfaces_idlist (l: list ident) : list ident :=
+  match l with
+  | nil => nil
+  | id :: l' => nodup ident_eq (superinterfaces_id id ++ superinterfaces_idlist l')
+  end.
+
+Definition superclasses_composite (mcd: mycomposite_definition) : list ident :=
+  match mcd with
+  | MCDstruct l => nil
+  | MCDunion l => nil
+  | MCDclass (Some pid) li l1 l2 => pid :: superclasses_id pid
+  | MCDclass None li l1 l2 => nil
+  | MCDinterface li l1 l2 => nil
+  end.
+
+Definition superinterfaces_composite (mcd: mycomposite_definition) : list ident :=
+  match mcd with
+  | MCDstruct l => nil
+  | MCDunion l => nil
+  | MCDclass _ li l1 l2 => nodup ident_eq (superinterfaces_idlist li)
+  | MCDinterface li l1 l2 => nodup ident_eq (superinterfaces_idlist li)
+  end.
+
 (** ** Alignment of a type *)
 
 (** Adjust the natural alignment [al] based on the attributes [a] attached
@@ -462,7 +540,7 @@ Definition align_attr (a: type_attr) (al: Z) : Z :=
 
 Fixpoint alignof (mt: mytype) (a: type_attr) : Z :=
   align_attr a
-   (match mt with
+    match mt with
     | MTprim pt =>
       match pt with
       | PTvoid => 1
@@ -477,6 +555,7 @@ Fixpoint alignof (mt: mytype) (a: type_attr) : Z :=
       | PTref => if Archi.ptr64 then 8 else 4
       | PTaddr A32 => 4
       | PTaddr A64 => if Archi.ptr64 then 8 else 4
+      | PTagg => 1
       end
     | MTpointer _ => if Archi.ptr64 then 8 else 4
     | MTarray ty' _ => alignof ty' default_type_attr
@@ -486,7 +565,7 @@ Fixpoint alignof (mt: mytype) (a: type_attr) : Z :=
       | Some co => co.(co_alignof)
       | None => 1
       end
-    end).
+    end.
 (*
 Remark align_attr_two_p:
   forall al a,
@@ -518,11 +597,10 @@ Proof.
   destruct (env!i). apply co_alignof_two_p. exists 0%nat; auto.
   destruct (env!i). apply co_alignof_two_p. exists 0%nat; auto.
 Qed.
-*)
+
 Lemma alignof_pos:
   forall mt ta, alignof mt ta > 0.
-Admitted.
-(*Proof.
+Proof.
   intros. destruct (alignof_two_p env t) as [n EQ]. rewrite EQ. apply two_power_nat_pos.
 Qed.*)
 
@@ -534,32 +612,34 @@ Qed.*)
   their size to be 1.  For undefined structures and unions, the size is
   arbitrarily taken to be 0.
 *)
-Fixpoint sizeof (mt: mytype) : Z :=
-  match mt with
-  | MTprim pt =>
-    match pt with
-    | PTvoid => 1
-    | PTint I8 _ => 1
-    | PTint I16 _ => 2
-    | PTint I32 _ => 4
-    | PTint I64 _ => Archi.align_int64
-    | PTbool => 1
-    | PTfloat F32 => 4
-    | PTfloat F64 => Archi.align_float64
-    | PTptr => if Archi.ptr64 then 8 else 4
-    | PTref => if Archi.ptr64 then 8 else 4
-    | PTaddr A32 => 4
-    | PTaddr A64 => if Archi.ptr64 then 8 else 4
-    end
-  | MTpointer _ => if Archi.ptr64 then 8 else 4
-  | MTarray ty' n => sizeof ty' * Z.max 0 n
-  | MTfunction l1 l2 => 1
-  | MTcomposite id =>
-    match ce ! id with
-    | Some co => co.(co_sizeof)
-    | None => 0
-    end
-  end.
+Fixpoint sizeof (mt: mytype) (ta: type_attr) : Z :=
+  align_attr ta
+    match mt with
+    | MTprim pt =>
+      match pt with
+      | PTvoid => 1
+      | PTint I8 _ => 1
+      | PTint I16 _ => 2
+      | PTint I32 _ => 4
+      | PTint I64 _ => Archi.align_int64
+      | PTbool => 1
+      | PTfloat F32 => 4
+      | PTfloat F64 => Archi.align_float64
+      | PTptr => if Archi.ptr64 then 8 else 4
+      | PTref => if Archi.ptr64 then 8 else 4
+      | PTaddr A32 => 4
+      | PTaddr A64 => if Archi.ptr64 then 8 else 4
+      | PTagg => 0
+      end
+    | MTpointer _ => if Archi.ptr64 then 8 else 4
+    | MTarray ty' n => sizeof ty' default_type_attr * Z.max 0 n
+    | MTfunction l1 l2 => 1
+    | MTcomposite id =>
+      match ce ! id with
+      | Some co => co.(co_sizeof)
+      | None => 0
+      end
+    end.
 
 (** ** Maximum field-id of a type *)
 
@@ -652,13 +732,13 @@ Definition alignof_composite (mcd: mycomposite_definition) : Z :=
 Fixpoint sum_sizeof_mymembervars (l: mymembervars) (cur: Z) : Z :=
   match l with
   | MMVnil => cur
-  | MMVcons _ t (_, a) _ l' => sum_sizeof_mymembervars l' (align cur (alignof t a) + sizeof t)
+  | MMVcons _ t (_, ta) _ l' => sum_sizeof_mymembervars l' (align cur (alignof t ta) + sizeof t ta)
   end.
 
 Fixpoint max_sizeof_mymembervars (l: mymembervars) : Z :=
   match l with
   | MMVnil => 0
-  | MMVcons _ t _ _ l' => Z.max (sizeof t) (max_sizeof_mymembervars l')
+  | MMVcons _ t (_, ta) _ l' => Z.max (sizeof t ta) (max_sizeof_mymembervars l')
   end.
 
 Definition sizeof_composite (mcd: mycomposite_definition) : Z :=
@@ -829,15 +909,15 @@ Qed.*)
 Fixpoint search_in_mymembervars_struct (l: mymembervars) (fi: positive) (cur: Z) : res (mytype * N * Z) :=
   match l with
   | MMVnil => Error (MSG "field-id" :: CTX fi :: nil)
-  | MMVcons _ mt (_, al) _ l' =>
+  | MMVcons _ mt (_, ta) _ l' =>
     let n := N_to_positive (N.succ (maxfield mt)) in
     match Pos.leb fi n with
-    | true => OK (mt, N.pred (Npos fi), align cur (alignof mt al))
-    | false => search_in_mymembervars_struct l' (Pos.sub fi n) (align cur (alignof mt al) + sizeof mt)
+    | true => OK (mt, N.pred (Npos fi), align cur (alignof mt ta))
+    | false => search_in_mymembervars_struct l' (Pos.sub fi n) (align cur (alignof mt ta) + sizeof mt ta)
     end
   end.
 
-Lemma search_in_mymembervars_struct_decrease_rank:
+(*Lemma search_in_mymembervars_struct_decrease_rank:
   forall l fi cur mt fi' cur',
     search_in_mymembervars_struct l fi cur = OK (mt, fi', cur') ->
     (rank mt <= rank_mymembervars l) % nat.
@@ -847,7 +927,7 @@ Proof.
   - destruct v. destruct (fi <=? N_to_positive (N.succ (maxfield m))) % positive eqn: E.
     + inversion H; subst. xomega.
     + apply IHl in H. xomega.
-Qed.
+Qed.*)
 
 Lemma search_in_mymembervars_struct_decrease_field:
   forall l fi cur mt fi' cur',
@@ -873,7 +953,7 @@ Fixpoint search_in_mymembervars_union (l: mymembervars) (fi: positive) (cur: Z) 
     end
   end.
 
-Lemma search_in_mymembervars_union_decrease_rank:
+(*Lemma search_in_mymembervars_union_decrease_rank:
   forall l fi cur mt fi' cur',
     search_in_mymembervars_union l fi cur = OK (mt, fi', cur') ->
     (rank mt <= rank_mymembervars l) % nat.
@@ -883,7 +963,7 @@ Proof.
   - destruct v. destruct (fi <=? N_to_positive (N.succ (maxfield m))) % positive eqn: E.
     + inversion H; subst. xomega.
     + apply IHl in H. xomega.
-Qed.
+Qed.*)
 
 Lemma search_in_mymembervars_union_decrease_field:
   forall l fi cur mt fi' cur',
@@ -924,7 +1004,7 @@ Program Definition fieldoffset_step (mt: mytype) (fi: positive) (cur: Z) : res (
   | _ => Error (MSG "field-id" :: CTX fi :: MSG "out of bounds" :: nil)
   end.
 
-Lemma fieldoffset_step_decrease_rank:
+(*Lemma fieldoffset_step_decrease_rank:
   forall mt fi cur mt' fi' cur',
     fieldoffset_step mt fi cur = OK (mt', fi', cur') ->
     (rank mt' < rank mt) % nat.
@@ -940,7 +1020,7 @@ Proof.
       * apply search_in_mymembervars_struct_decrease_rank in H. admit.
     + apply search_in_mymembervars_struct_decrease_rank in H. admit.
   - apply search_in_mymembervars_struct_decrease_rank in H. admit.
-Admitted.
+Admitted.*)
 
 Lemma fieldoffset_step_decrease_field:
   forall mt fi cur mt' fi' cur',
@@ -986,7 +1066,7 @@ Next Obligation.
   unfold N.lt in *. simpl in *. apply nat_of_P_lt_Lt_compare_morphism; auto.
 Qed.
 
-Definition filedoffset (e: composite_env) (mt: mytype) (fi: N) : res (mytype * Z) :=
+Definition fieldoffset (mt: mytype) (fi: N) : res (mytype * Z) :=
   match fi with
   | N0 => OK (mt, 0)
   | Npos p => fieldoffset_rec mt p 0
@@ -1104,6 +1184,7 @@ Definition access_mode (mt: mytype) : mode :=
     | PTptr => By_value Mptr
     | PTref => By_value Mptr
     | PTaddr _ => By_value Mptr
+    | PTagg => By_copy
     end
   | MTpointer _ => By_value Mptr
   | MTarray _ _ => By_reference
@@ -1221,6 +1302,12 @@ Fixpoint type_of_params (params: list (ident * type)) : typelist :=
   | nil => Tnil
   | (id, ty) :: rem => Tcons ty (type_of_params rem)
   end.
+
+Fixpoint type_of_returns (returns: list type) : typelist :=
+  match returns with
+  | nil => Tnil
+  | ty :: rem => Tcons ty (type_of_returns rem)
+  end.
 (*
 (** Translating C types to Cminor types and function signatures. *)
 
@@ -1330,6 +1417,9 @@ Program Definition composite_of_def (ce: composite_env) (id: ident)
             co_alignof := al;
             co_rank := rank_composite ce mcd;
             co_maxfield := maxfield_composite ce mcd;
+            co_depth := depthof_composite ce mcd;
+            co_superclasses := superclasses_composite ce mcd;
+            co_superinterfaces := superinterfaces_composite ce mcd;
             co_sizeof_pos := _;
             co_alignof_two_p := _;
             co_sizeof_alignof := _ |}
@@ -1489,47 +1579,50 @@ Qed.
 (** It follows that the sizes and alignments contained in the composite
   environment produced by [build_composite_env] are consistent with
   the sizes and alignments of the members of the composite types. *)
-
-Record composite_consistent (env: composite_env) (co: composite) : Prop := {
+*)
+Record composite_consistent (ce: composite_env) (co: composite) : Prop := {
   co_consistent_complete:
-     complete_members env (co_members co) = true;
+     complete_composite ce (co_def co) = true;
   co_consistent_alignof:
-     co_alignof co = align_attr (co_attr co) (alignof_composite env (co_members co));
+     co_alignof co = (alignof_composite ce (co_def co));
   co_consistent_sizeof:
-     co_sizeof co = align (sizeof_composite env (co_su co) (co_members co)) (co_alignof co);
-  co_consistent_rank:
-     co_rank co = rank_members env (co_members co)
+     co_sizeof co = align (sizeof_composite ce (co_def co)) (co_alignof co);
+  co_consistent_depth:
+     co_depth co = depthof_composite ce (co_def co)
 }.
 
-Definition composite_env_consistent (env: composite_env) : Prop :=
-  forall id co, env!id = Some co -> composite_consistent env co.
+Definition composite_env_consistent (ce: composite_env) : Prop :=
+  forall id co, ce ! id = Some co -> composite_consistent ce co.
 
 Lemma composite_consistent_stable:
   forall (env env': composite_env)
          (EXTENDS: forall id co, env!id = Some co -> env'!id = Some co)
          co,
   composite_consistent env co -> composite_consistent env' co.
-Proof.
+Admitted.
+(*Proof.
   intros. destruct H as [A B C D]. constructor. 
   eapply complete_members_stable; eauto.
   symmetry; rewrite B. f_equal. apply alignof_composite_stable; auto. 
   symmetry; rewrite C. f_equal. apply sizeof_composite_stable; auto.
   symmetry; rewrite D. apply rank_members_stable; auto.
-Qed.
+Qed.*)
 
 Lemma composite_of_def_consistent:
-  forall env id su m a co,
-  composite_of_def env id su m a = OK co ->
-  composite_consistent env co.
-Proof.
+  forall ce id mcd co,
+  composite_of_def ce id mcd = OK co ->
+  composite_consistent ce co.
+Admitted.
+(*Proof.
   unfold composite_of_def; intros. 
   destruct (env!id); try discriminate. destruct (complete_members env m) eqn:C; inv H.
   constructor; auto.
-Qed. 
+Qed.*)
 
 Theorem build_composite_env_consistent:
-  forall defs env, build_composite_env defs = OK env -> composite_env_consistent env.
-Proof.
+  forall te defs ce, build_composite_env te defs = OK ce -> composite_env_consistent ce.
+Admitted.
+(*Proof.
   cut (forall defs env0 env,
        add_composite_definitions env0 defs = OK env ->
        composite_env_consistent env0 ->
