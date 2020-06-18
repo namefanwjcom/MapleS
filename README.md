@@ -1,8 +1,9 @@
-# CompCert
-The verified C compiler.
+# MapleS
+The formal syntax and semantics of a core subset of MapleIR, based on [CompCert, version 3.7](http://compcert.inria.fr/).
+MapleIR is the intermediate language of the openark compiler, see (https://gitee.com/openarkcompiler-incubator/mapleall/blob/master/doc/maple_ir_spec.md) for more information on MapleIR.
 
 ## Overview
-The CompCert C verified compiler is a compiler for a large subset of the
+[^_^]:The CompCert C verified compiler is a compiler for a large subset of the
 C programming language that generates code for the PowerPC, ARM, x86 and
 RISC-V processors.
 
@@ -31,9 +32,7 @@ AbsInt Angewandte Informatik GmbH.
 
 
 ## Contact
-General discussions on CompCert take place on the
-[compcert-users@inria.fr](https://sympa.inria.fr/sympa/info/compcert-users)
-mailing list.
+namefanwjcom@outlook.com
 
 For inquiries on the commercial version of CompCert, please contact
 info@absint.com
