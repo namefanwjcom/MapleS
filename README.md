@@ -1,38 +1,25 @@
 # MapleS
 The formal syntax and semantics of a core subset of MapleIR, based on [CompCert, version 3.7](http://compcert.inria.fr/).
-MapleIR is the intermediate language of the openark compiler, see (https://gitee.com/openarkcompiler-incubator/mapleall/blob/master/doc/maple_ir_spec.md) for more information on MapleIR.
+MapleIR is the intermediate language of the openark compiler, see [here](https://gitee.com/openarkcompiler-incubator/mapleall/blob/master/doc/maple_ir_spec.md) for more information on MapleIR.
 
 ## Overview
-[^_^]:The CompCert C verified compiler is a compiler for a large subset of the
-C programming language that generates code for the PowerPC, ARM, x86 and
-RISC-V processors.
+The following files are written by me.
 
-The distinguishing feature of CompCert is that it has been formally
-verified using the Coq proof assistant: the generated assembly code is
-formally guaranteed to behave as prescribed by the semantics of the
-source C code.
+cfrontend/Maple.v: the core syntax and semantics of MapleIR.
 
-For more information on CompCert (supported platforms, supported C
-features, installation instructions, using the compiler, etc), please
-refer to the [Web site](http://compcert.inria.fr/) and especially
-the [user's manual](http://compcert.inria.fr/man/).
+cfrontend/Mapletypes.v: the definition and preprocessing of types in MapleIR.
+
+cfrontend/MapleOp.v: the semantics of most arithmetic expressions and type conversion expressions.
+
+cfrontend/MapleExec.v: the excutable semantics of MapleIR and its correctness proof with respect to the semantics defined in cfrontend/Maple.v.
+
+lib/TopoSort.v: the implementation of the topological-sorting algorithm without any correctness proof, which is used in the preprocessing of types in cfrontend/Mapletypes.v.
 
 ## License
-CompCert is not free software.  This non-commercial release can only
-be used for evaluation, research, educational and personal purposes.
-A commercial version of CompCert, without this restriction and with
-professional support, can be purchased from
-[AbsInt](https://www.absint.com).  See the file `LICENSE` for more
-information.
+To be completed.
 
 ## Copyright
-The CompCert verified compiler is Copyright Institut National de
-Recherche en Informatique et en Automatique (INRIA) and 
-AbsInt Angewandte Informatik GmbH.
-
+To be completed.
 
 ## Contact
-namefanwjcom@outlook.com
-
-For inquiries on the commercial version of CompCert, please contact
-info@absint.com
+If you have any question, please contact namefanwjcom@outlook.com.
