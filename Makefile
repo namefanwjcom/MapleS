@@ -62,7 +62,8 @@ FLOCQ=\
 VLIB=Axioms.v Coqlib.v Intv.v Maps.v Heaps.v Lattice.v Ordered.v \
   Iteration.v Zbits.v Integers.v Archi.v IEEE754_extra.v Floats.v \
   Parmov.v UnionFind.v Wfsimpl.v \
-  Postorder.v FSetAVLplus.v IntvSets.v Decidableplus.v BoolEqual.v
+  Postorder.v FSetAVLplus.v IntvSets.v Decidableplus.v BoolEqual.v \
+  TopoSort.v
 
 # Parts common to the front-ends and the back-end (in common/)
 
@@ -109,7 +110,7 @@ CFRONTEND=Ctypes.v Cop.v Csyntax.v Csem.v Ctyping.v Cstrategy.v Cexec.v \
   Clight.v ClightBigstep.v SimplLocals.v SimplLocalsproof.v \
   Cshmgen.v Cshmgenproof.v \
   Csharpminor.v Cminorgen.v Cminorgenproof.v \
-  Maple.v Mapletypes.v
+  Maple.v Mapletypes.v MapleOp.v MapleExec.v
 
 # Parser
 

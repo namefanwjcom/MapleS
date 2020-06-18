@@ -712,7 +712,7 @@ Fixpoint step (st: state) : option state :=
   | NormalState f (S_label lbl s) th k le oe m =>
     Some (NormalState f s th k le oe m)
   | NormalState f (S_goto lbl) th k le oe m =>
-    match find_label lbl (fun_body f) (call_cont k) with
+    match find_label lbl (fun_statement (snd f)) (call_cont k) with
     | Some (s', k') =>
       Some (NormalState f s' th k' le oe m)
     | None => None
@@ -730,7 +730,7 @@ Fixpoint step (st: state) : option state :=
   | NormalState f (S_return el) th k le oe m =>
     match eval_exprlist le th m el with
     | Some vl =>
-      match typelist_to_mytypelist (genv_mytypes ge) (type_of_returns (fun_returns f)) with
+      match typelist_to_mytypelist (genv_mytypes ge) (type_of_returns (fun_returns (fst f))) with
       | OK mtl' =>
         match sem_cast_list ge vl (mytypelistof el) mtl' m with
         | Some vl' =>
@@ -747,7 +747,7 @@ Fixpoint step (st: state) : option state :=
     end
   | NormalState f S_skip th k le oe m =>
     if is_call_cont k then
-      match type_of_returns (fun_returns f) with
+      match type_of_returns (fun_returns (fst f)) with
       | Tnil =>
         match Mem.free_list m (blocks_of_lenv ge le) with
         | Some m' =>
@@ -761,8 +761,8 @@ Fixpoint step (st: state) : option state :=
     match eval_exprlist le th m el with
     | Some vl =>
       match find_function_by_name ge fid with
-      | Some (f', fa) =>
-        match typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params f')) with
+      | Some (loc, f') =>
+        match typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params (fst f'))) with
         | OK mtl' =>
           match sem_cast_list ge vl (mytypelistof el) mtl' m with
           | Some vl' =>
@@ -786,8 +786,8 @@ Fixpoint step (st: state) : option state :=
             match dispatch_function ge cid' fid with
             | Some fid' =>
               match find_function_by_name ge fid' with
-              | Some (f', fa) =>
-                match typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params f')) with
+              | Some (loc, f') =>
+                match typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params (fst f'))) with
                 | OK mtl' =>
                   match sem_cast_list ge (v :: vl) (mytypelistof (E_cons e el)) mtl' m with
                   | Some vl' =>
@@ -818,8 +818,8 @@ Fixpoint step (st: state) : option state :=
             match dispatch_function ge cid' fid with
             | Some fid' =>
               match find_function_by_name ge fid' with
-              | Some (f', fa) =>
-                match typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params f')) with
+              | Some (loc, f') =>
+                match typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params (fst f'))) with
                 | OK mtl' =>
                   match sem_cast_list ge (v :: vl) (mytypelistof (E_cons e el)) mtl' m with
                   | Some vl' =>
@@ -846,8 +846,8 @@ Fixpoint step (st: state) : option state :=
         match eval_exprlist le th m el with
         | Some vl =>
           match find_function_by_address ge loc with
-          | Some (f', fa) =>
-            match typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params f')) with
+          | Some f' =>
+            match typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params (fst f'))) with
             | OK mtl' =>
               match sem_cast_list ge vl (mytypelistof el) mtl' m with
               | Some vl' =>
@@ -868,7 +868,7 @@ Fixpoint step (st: state) : option state :=
   | ExceptionState f (v, mt) k le oe m =>
     match catch_cont k with
     | Kjavatry ll k1 =>
-      match find_handler ge (resolve_type oe v mt) ll (fun_body f) (call_cont k1) with
+      match find_handler ge (resolve_type oe v mt) ll (fun_statement (snd f)) (call_cont k1) with
       | Some k3 =>
         Some (NormalState f S_skip (Some (v, mt)) k3 le oe m)
       | None => Some (ExceptionState f (v, mt) k1 le oe m)
@@ -956,10 +956,14 @@ Fixpoint step (st: state) : option state :=
     | None => None
     end
   | CallState f vl k oe m =>
-    match function_entry ge f m vl with
-    | Some (le, m') =>
-      Some (NormalState f (fun_body f) None k le oe m')
-    | None => None
+    match f with
+    | (fp, Some fb) =>
+      match function_entry ge (fp, fb) m vl with
+      | Some (le, m') =>
+        Some (NormalState (fp, fb) (fun_statement fb) None k le oe m')
+      | None => None
+      end
+    | (_, None) => None
     end
   | ReturnState vl (Kcall l f le k) oe m =>
     match assign_returns ge le l vl m with
@@ -984,12 +988,12 @@ Proof.
     destruct s; eauto.
     + (* S_skip *)
       destruct k; simpl in *; try congruence.
-      * destruct (type_of_returns (fun_returns f)) eqn: E1; try congruence.
+      * destruct (type_of_returns (fun_returns (fst f))) eqn: E1; try congruence.
         destruct (Mem.free_list m (blocks_of_lenv ge le)) eqn: E2; try congruence.
         inversion H; subst; eauto.
       * inversion H; subst; eauto.
       * inversion H; subst; eauto.
-      * destruct (type_of_returns (fun_returns f)) eqn: E1; try congruence.
+      * destruct (type_of_returns (fun_returns (fst f))) eqn: E1; try congruence.
         destruct (Mem.free_list m (blocks_of_lenv ge le)) eqn: E2; try congruence.
         inversion H; subst; eauto.
     + (* S_dassign *)
@@ -1045,12 +1049,12 @@ Proof.
     + (* S_while *)
       inversion H; subst; eauto.
     + (* S_goto *)
-      destruct (find_label l (fun_body f) (call_cont k)) eqn: E1; try congruence.
+      destruct (find_label l (fun_statement (snd f)) (call_cont k)) eqn: E1; try congruence.
       destruct p.
       inversion H; subst; eauto.
     + (* S_return *)
       destruct (eval_exprlist le th m retlist) eqn: E1; try congruence.
-      destruct (typelist_to_mytypelist (genv_mytypes ge) (type_of_returns (fun_returns f))) eqn: E2; try congruence.
+      destruct (typelist_to_mytypelist (genv_mytypes ge) (type_of_returns (fun_returns (fst f)))) eqn: E2; try congruence.
       destruct (sem_cast_list ge l (mytypelistof retlist) m0 m) eqn: E3; try congruence.
       destruct (Mem.free_list m (blocks_of_lenv ge le)) eqn: E4; try congruence.
       inversion H; subst; eauto.
@@ -1062,8 +1066,8 @@ Proof.
       destruct f0.
       destruct (eval_exprlist le th m opndlist) eqn: E1; try congruence.
       destruct (find_function_by_name ge i) eqn: E2; try congruence.
-      destruct f0.
-      destruct ( typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params f0))) eqn: E3; try congruence.
+      destruct p.
+      destruct (typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params (fst f0)))) eqn: E3; try congruence.
       destruct (sem_cast_list ge l (mytypelistof opndlist) m0 m) eqn: E4; try congruence.
       inversion H; subst; eauto.
     + (* S_icallassigned *)
@@ -1072,8 +1076,7 @@ Proof.
       destruct (Ptrofs.eq_dec i Ptrofs.zero); try congruence.
       destruct (eval_exprlist le th m opndlist) eqn: E2; try congruence.
       destruct (find_function_by_address ge b) eqn: E3; try congruence.
-      destruct f0.
-      destruct ( typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params f0))) eqn: E4; try congruence.
+      destruct (typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params (fst f0)))) eqn: E4; try congruence.
       destruct (sem_cast_list ge l (mytypelistof opndlist) m0 m) eqn: E5; try congruence.
       inversion H; subst; eauto.
     + (* S_virtualcallassigned *)
@@ -1084,8 +1087,8 @@ Proof.
       destruct (in_dec ident_eq c (superclasses_id (genv_cenv ge) i)); try congruence.
       destruct (dispatch_function ge i f0) eqn: E4; try congruence.
       destruct (find_function_by_name ge i1) eqn: E5; try congruence.
-      destruct f1.
-      destruct ( typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params f1))) eqn: E6; try congruence.
+      destruct p.
+      destruct (typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params (fst f1)))) eqn: E6; try congruence.
       destruct (sem_cast_list ge (v :: l) (mytypelistof (E_cons obj_ptr opndlist)) m0 m) eqn: E7; try congruence.
       inversion H; subst; eauto.
     + (* S_interfacecallassigned *)
@@ -1096,8 +1099,8 @@ Proof.
       destruct (in_dec ident_eq c (superinterfaces_id (genv_cenv ge) i)); try congruence.
       destruct (dispatch_function ge i f0) eqn: E4; try congruence.
       destruct (find_function_by_name ge i1) eqn: E5; try congruence.
-      destruct f1.
-      destruct ( typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params f1))) eqn: E6; try congruence.
+      destruct p.
+      destruct ( typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params (fst f1)))) eqn: E6; try congruence.
       destruct (sem_cast_list ge (v :: l) (mytypelistof (E_cons obj_ptr opndlist)) m0 m) eqn: E7; try congruence.
       inversion H; subst; eauto.
     + (* S_javatry *)
@@ -1143,7 +1146,8 @@ Proof.
       destruct (eval_expr le th m opnd) eqn: E1; try congruence.
       inversion H; subst; eauto.
   - (* CallState *)
-    destruct (function_entry ge f m args) eqn: E1; try congruence.
+    destruct f. destruct o; try congruence.
+    destruct (function_entry ge (f, f0) m args) eqn: E1; try congruence.
     destruct p.
     inversion H; subst; eauto.
   - (* ReturnState *)
@@ -1153,7 +1157,7 @@ Proof.
   - (* ExceptionState *)
     destruct th.
     destruct (catch_cont k) eqn: E1; try congruence.
-    destruct (find_handler ge (resolve_type oe v p) l (fun_body f) (call_cont c)) eqn: E2; try congruence.
+    destruct (find_handler ge (resolve_type oe v p) l (fun_statement (snd f)) (call_cont c)) eqn: E2; try congruence.
     + (* case 1 *)
       inversion H; subst; eauto.
     + (* case 2 *)
@@ -1225,7 +1229,7 @@ Proof.
   - (* S_eval *)
     erewrite eval_expr_complete; eauto.
   - (* CallState *)
-    rewrite H0; auto.
+    rewrite H1; auto.
   - (* ReturnState *)
     rewrite H0; auto.
 Qed.

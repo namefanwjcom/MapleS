@@ -18,6 +18,7 @@
 Require Import Axioms Coqlib Maps Errors.
 Require Import AST Linking.
 Require Archi.
+Require Import TopoSort.
 
 (** * Syntax of types *)
 
@@ -52,36 +53,6 @@ Inductive addrsize : Type :=
 Inductive complexsize : Type :=
   | C64: complexsize
   | C128: complexsize.
-
-(** Every type carries a set of attributes.  Currently, only two
-  attributes are modeled: [volatile] and [_Alignas(n)] (from ISO C 2011). *)
-
-Inductive storage_class :=
-  | no_storage_class
-  | extern
-  | fstatic
-  | pstatic.
-
-Record type_attr := {
-  ta_volatile : bool;
-  ta_static : bool;
-  ta_const : bool;
-  ta_alignment : option N;
-}.
-
-Definition default_type_attr :=
-  {| ta_volatile := false;
-     ta_static := false;
-     ta_const := false;
-     ta_alignment := None |}.
-
-Definition var_attr := (storage_class * type_attr) % type.
-
-Definition default_var_attr := (no_storage_class, default_type_attr).
-
-Record field_attr := {}.
-
-Record func_attr := {}.
 
 (** The syntax of type expressions.  Some points to note:
 - Array types [Tarray n] carry the size [n] of the array.
@@ -184,7 +155,7 @@ Definition add_type (e: PTree.t mytype) (idty: ident * type) : res (PTree.t myty
   | None => do mt <- type_to_mytype e ty; OK (PTree.set id mt e)
   end.
 
-Fixpoint add_types (l: list (ident * type)) : res (PTree.t mytype) :=
+Definition add_types (l: list (ident * type)) : res (PTree.t mytype) :=
   mfold_left add_type l (PTree.empty mytype).
 
 (*
@@ -242,33 +213,84 @@ Definition merge_attributes (ty: type) (a: attr) : type :=
   are collectively called "composites".  Each compilation unit
   comes with a list of top-level definitions of composites. *)
 
+(** Every type carries a set of attributes.  Currently, only two
+  attributes are modeled: [volatile] and [_Alignas(n)] (from ISO C 2011). *)
+
+Record type_attr := {
+  (*ta_volatile : bool;
+  ta_const : bool;*)
+  ta_alignment : option N;
+}.
+
+Definition default_type_attr :=
+  {| (*ta_volatile := false;
+     ta_static := false;
+     ta_const := false;*)
+     ta_alignment := None |}.
+
+Inductive access_modifier :=
+  | AM_friendly
+  | AM_public
+  | AM_protected
+  | AM_private.
+
+Record field_attr := {
+  fia_access: access_modifier;
+  (*fia_static: bool;*)
+  (*fia_final: bool;*)
+  (*fia_transient: bool;*)
+}.
+
+Record func_attr := {
+  fa_access: access_modifier;
+  fa_abstract: bool;
+  (*fa_native: bool;*)
+  fa_final: bool;
+  fa_static: bool;
+  fa_virtual: bool;
+  fa_constructor: bool;
+  (*fa_strict: bool;*)
+  (*fa_synchronized: bool;*)
+}.
+
+Record class_attr := {
+  ca_access: access_modifier;
+  ca_abstract: bool;
+  ca_final: bool;
+}.
+
+Record interface_attr := {
+  ia_access: access_modifier;
+  ia_abstract: bool;
+}.
+
 Inductive membervars : Type :=
   | MVnil: membervars
-  | MVcons: ident -> type -> var_attr -> field_attr -> membervars -> membervars.
+  | MVcons: ident -> type -> type_attr -> field_attr -> membervars -> membervars.
 
 Inductive memberfuncs : Type :=
   | MFnil : memberfuncs
-  | MFcons: ident -> ident -> type -> func_attr -> field_attr -> memberfuncs -> memberfuncs.
+  | MFcons: ident -> ident -> type -> func_attr -> memberfuncs -> memberfuncs.
 
 Inductive composite_definition : Type :=
   | CDstruct: membervars -> composite_definition
   | CDunion: membervars -> composite_definition
-  | CDclass: option ident -> list ident -> membervars -> memberfuncs -> composite_definition
-  | CDinterface: list ident -> membervars -> memberfuncs -> composite_definition.
+  | CDclass: option ident -> list ident -> membervars -> memberfuncs -> class_attr -> composite_definition
+  | CDinterface: list ident -> membervars -> memberfuncs -> interface_attr -> composite_definition.
 
 Inductive mymembervars : Type :=
   | MMVnil: mymembervars
-  | MMVcons: ident -> mytype -> var_attr -> field_attr -> mymembervars -> mymembervars.
+  | MMVcons: ident -> mytype -> type_attr -> field_attr -> mymembervars -> mymembervars.
 
 Inductive mymemberfuncs : Type :=
   | MMFnil : mymemberfuncs
-  | MMFcons: ident -> ident -> mytype -> func_attr -> field_attr -> mymemberfuncs -> mymemberfuncs.
+  | MMFcons: ident -> ident -> mytype -> func_attr -> mymemberfuncs -> mymemberfuncs.
 
 Inductive mycomposite_definition : Type :=
   | MCDstruct: mymembervars -> mycomposite_definition
   | MCDunion: mymembervars -> mycomposite_definition
-  | MCDclass: option ident -> list ident -> mymembervars -> mymemberfuncs -> mycomposite_definition
-  | MCDinterface: list ident -> mymembervars -> mymemberfuncs -> mycomposite_definition.
+  | MCDclass: option ident -> list ident -> mymembervars -> mymemberfuncs -> class_attr -> mycomposite_definition
+  | MCDinterface: list ident -> mymembervars -> mymemberfuncs -> interface_attr -> mycomposite_definition.
 
 Definition mycomposite_def_eq (x y: mycomposite_definition): {x=y} + {x<>y}.
 Admitted.
@@ -285,34 +307,43 @@ Global Opaque mycomposite_def_eq.
 Fixpoint membervars_to_mymembervars (e: PTree.t mytype) (l: membervars) : res mymembervars :=
   match l with
   | MVnil => OK MMVnil
-  | MVcons id ty va fia l' => do mt <- type_to_mytype e ty; do ml' <- membervars_to_mymembervars e l'; OK (MMVcons id mt va fia ml')
+  | MVcons id ty ta fia l' => do mt <- type_to_mytype e ty; do ml' <- membervars_to_mymembervars e l'; OK (MMVcons id mt ta fia ml')
   end.
 
 Fixpoint memberfuncs_to_mymemberfuncs (e: PTree.t mytype) (l: memberfuncs) : res mymemberfuncs :=
   match l with
   | MFnil => OK MMFnil
-  | MFcons cid fid ty fa fia l' => do mt <- type_to_mytype e ty; do ml' <- memberfuncs_to_mymemberfuncs e l'; OK (MMFcons cid fid mt fa fia ml')
+  | MFcons cid fid ty fa l' =>
+    do mt <- type_to_mytype e ty;
+    do ml' <- memberfuncs_to_mymemberfuncs e l';
+    OK (MMFcons cid fid mt fa ml')
   end.
 
 Fixpoint composite_definition_to_mycomposite_definition (e: PTree.t mytype) (cd: composite_definition) : res mycomposite_definition :=
   match cd with
   | CDstruct mvl =>
-    do mmvl <- membervars_to_mymembervars e mvl; OK (MCDstruct mmvl)
+    do mmvl <- membervars_to_mymembervars e mvl;
+    OK (MCDstruct mmvl)
   | CDunion mvl =>
-    do mmvl <- membervars_to_mymembervars e mvl; OK (MCDunion mmvl)
-  | CDclass pid idl mvl mfl =>
-    do mmvl <- membervars_to_mymembervars e mvl; do mmfl <- memberfuncs_to_mymemberfuncs e mfl; OK (MCDclass pid idl mmvl mmfl)
-  | CDinterface idl mvl mfl =>
-    do mmvl <- membervars_to_mymembervars e mvl; do mmfl <- memberfuncs_to_mymemberfuncs e mfl; OK (MCDinterface idl mmvl mmfl)
+    do mmvl <- membervars_to_mymembervars e mvl;
+    OK (MCDunion mmvl)
+  | CDclass pid idl mvl mfl ca =>
+    do mmvl <- membervars_to_mymembervars e mvl;
+    do mmfl <- memberfuncs_to_mymemberfuncs e mfl;
+    OK (MCDclass pid idl mmvl mmfl ca)
+  | CDinterface idl mvl mfl ia =>
+    do mmvl <- membervars_to_mymembervars e mvl;
+    do mmfl <- memberfuncs_to_mymemberfuncs e mfl;
+    OK (MCDinterface idl mmvl mmfl ia)
   end.
 
-Fixpoint composite_definitions_to_mycomposite_definitions (e: PTree.t mytype) (l: list composite_definition) : res (list mycomposite_definition) :=
+Fixpoint composite_definitions_to_mycomposite_definitions (e: PTree.t mytype) (l: list (ident * composite_definition)) : res (list (ident * mycomposite_definition)) :=
   match l with
   | nil => OK nil
-  | cd :: l' =>
+  | (id, cd) :: l' =>
     do mcd <- composite_definition_to_mycomposite_definition e cd;
-      do ml' <- composite_definitions_to_mycomposite_definitions e l';
-      OK (mcd :: ml')
+    do ml' <- composite_definitions_to_mycomposite_definitions e l';
+    OK ((id, mcd) :: ml')
   end.
 
 (** For type-checking, compilation and semantics purposes, the composite
@@ -330,9 +361,9 @@ Definition lengthof_composite (mcd: mycomposite_definition) : nat :=
   match mcd with
   | MCDstruct l => lengthof_mymembervars l
   | MCDunion l => lengthof_mymembervars l
-  | MCDclass (Some _) _ l _ => S (lengthof_mymembervars l)
-  | MCDclass None _ l _ => S (lengthof_mymembervars l)
-  | MCDinterface _ l _ => lengthof_mymembervars l
+  | MCDclass (Some _) _ l _ _ => S (lengthof_mymembervars l)
+  | MCDclass None _ l _ _ => S (lengthof_mymembervars l)
+  | MCDinterface _ l _ _ => lengthof_mymembervars l
   end.
 
 Record composite : Type := {
@@ -482,9 +513,9 @@ Definition depthof_composite (mcd: mycomposite_definition) : N :=
   match mcd with
   | MCDstruct l => 0
   | MCDunion l => 0
-  | MCDclass (Some pid) li l1 l2 => N.succ (N.max (depthof_id pid) (maxdepthof_idlist li))
-  | MCDclass None li l1 l2 => N.succ (maxdepthof_idlist li)
-  | MCDinterface li l1 l2 => N.succ (maxdepthof_idlist li)
+  | MCDclass (Some pid) li l1 l2 ca => N.succ (N.max (depthof_id pid) (maxdepthof_idlist li))
+  | MCDclass None li l1 l2 ca => N.succ (maxdepthof_idlist li)
+  | MCDinterface li l1 l2 ia => N.succ (maxdepthof_idlist li)
   end.
 
 Definition superclasses_id (id: ident) : list ident :=
@@ -509,17 +540,17 @@ Definition superclasses_composite (mcd: mycomposite_definition) : list ident :=
   match mcd with
   | MCDstruct l => nil
   | MCDunion l => nil
-  | MCDclass (Some pid) li l1 l2 => pid :: superclasses_id pid
-  | MCDclass None li l1 l2 => nil
-  | MCDinterface li l1 l2 => nil
+  | MCDclass (Some pid) li l1 l2 ca => pid :: superclasses_id pid
+  | MCDclass None li l1 l2 ca => nil
+  | MCDinterface li l1 l2 ia => nil
   end.
 
 Definition superinterfaces_composite (mcd: mycomposite_definition) : list ident :=
   match mcd with
   | MCDstruct l => nil
   | MCDunion l => nil
-  | MCDclass _ li l1 l2 => nodup ident_eq (superinterfaces_idlist li)
-  | MCDinterface li l1 l2 => nodup ident_eq (superinterfaces_idlist li)
+  | MCDclass _ li l1 l2 ca => nodup ident_eq (superinterfaces_idlist li)
+  | MCDinterface li l1 l2 ia => nodup ident_eq (superinterfaces_idlist li)
   end.
 
 (** ** Alignment of a type *)
@@ -709,20 +740,20 @@ Qed.
 Fixpoint alignof_mymembervars (l: mymembervars) : Z :=
   match l with
   | MMVnil => 1
-  | MMVcons _ t (_, a) _ l' => Z.max (alignof t a) (alignof_mymembervars l')
+  | MMVcons _ t ta _ l' => Z.max (alignof t ta) (alignof_mymembervars l')
   end.
 
 Definition alignof_composite (mcd: mycomposite_definition) : Z :=
   match mcd with
   | MCDstruct l => alignof_mymembervars l
   | MCDunion l => alignof_mymembervars l
-  | MCDclass (Some pid) li l1 l2 =>
+  | MCDclass (Some pid) li l1 l2 ca =>
     match ce ! pid with
     | Some co => Z.max co.(co_alignof) (alignof_mymembervars l1)
     | None => 1
     end
-  | MCDclass None li l1 l2 => alignof_mymembervars l1
-  | MCDinterface li l1 l2 => alignof_mymembervars l1
+  | MCDclass None li l1 l2 ca => alignof_mymembervars l1
+  | MCDinterface li l1 l2 ia => alignof_mymembervars l1
   end.
 
 (** The size of a structure corresponds to its layout: fields are
@@ -732,26 +763,26 @@ Definition alignof_composite (mcd: mycomposite_definition) : Z :=
 Fixpoint sum_sizeof_mymembervars (l: mymembervars) (cur: Z) : Z :=
   match l with
   | MMVnil => cur
-  | MMVcons _ t (_, ta) _ l' => sum_sizeof_mymembervars l' (align cur (alignof t ta) + sizeof t ta)
+  | MMVcons _ t ta _ l' => sum_sizeof_mymembervars l' (align cur (alignof t ta) + sizeof t ta)
   end.
 
 Fixpoint max_sizeof_mymembervars (l: mymembervars) : Z :=
   match l with
   | MMVnil => 0
-  | MMVcons _ t (_, ta) _ l' => Z.max (sizeof t ta) (max_sizeof_mymembervars l')
+  | MMVcons _ t ta _ l' => Z.max (sizeof t ta) (max_sizeof_mymembervars l')
   end.
 
 Definition sizeof_composite (mcd: mycomposite_definition) : Z :=
   match mcd with
   | MCDstruct l => sum_sizeof_mymembervars l 0
   | MCDunion l => max_sizeof_mymembervars l
-  | MCDclass (Some pid) li l1 l2 =>
+  | MCDclass (Some pid) li l1 l2 ca =>
     match ce ! pid with
     | Some co => sum_sizeof_mymembervars l1 co.(co_sizeof)
     | None => 0
     end
-  | MCDclass None li l1 l2 => sum_sizeof_mymembervars l1 0
-  | MCDinterface li l1 l2 => sum_sizeof_mymembervars l1 0
+  | MCDclass None li l1 l2 ca => sum_sizeof_mymembervars l1 0
+  | MCDinterface li l1 l2 ia => sum_sizeof_mymembervars l1 0
   end.
 (*
 Lemma alignof_composite_two_p:
@@ -795,39 +826,39 @@ Qed.
 Fixpoint maxfield_mymembervars (l: mymembervars) : N :=
   match l with
   | MMVnil => 0
-  | MMVcons _ t (_, a) _ l' => 1 + maxfield t + maxfield_mymembervars l'
+  | MMVcons _ t _ _ l' => 1 + maxfield t + maxfield_mymembervars l'
   end.
 
 Fixpoint maxfield_composite (mcd: mycomposite_definition) : N :=
   match mcd with
   | MCDstruct l => maxfield_mymembervars l
   | MCDunion l => maxfield_mymembervars l
-  | MCDclass (Some pid) li l1 l2 =>
+  | MCDclass (Some pid) li l1 l2 ca =>
     match ce ! pid with
     | Some co => 1 + co.(co_maxfield) + maxfield_mymembervars l1
     | None => 0
     end
-  | MCDclass None li l1 l2 => maxfield_mymembervars l1
-  | MCDinterface li l1 l2 => maxfield_mymembervars l1
+  | MCDclass None li l1 l2 ca => maxfield_mymembervars l1
+  | MCDinterface li l1 l2 ia => maxfield_mymembervars l1
   end.
 
 Fixpoint memberfield_mymembervars (l: mymembervars) : list N :=
   match l with
   | MMVnil => nil
-  | MMVcons _ t (_, a) _ l' => (1 + maxfield t) % N :: memberfield_mymembervars l'
+  | MMVcons _ t _ _ l' => (1 + maxfield t) % N :: memberfield_mymembervars l'
   end.
 
 Fixpoint memberfield_composite (mcd: mycomposite_definition) : list N :=
   match mcd with
   | MCDstruct l => memberfield_mymembervars l
   | MCDunion l => memberfield_mymembervars l
-  | MCDclass (Some pid) li l1 l2 =>
+  | MCDclass (Some pid) li l1 l2 ca =>
     match ce ! pid with
     | Some co => (1 + co.(co_maxfield)) % N :: memberfield_mymembervars l1
     | None => nil
     end
-  | MCDclass None li l1 l2 => memberfield_mymembervars l1
-  | MCDinterface li l1 l2 => memberfield_mymembervars l1
+  | MCDclass None li l1 l2 ca => memberfield_mymembervars l1
+  | MCDinterface li l1 l2 ia => memberfield_mymembervars l1
   end.
 
 (** Type ranks *)
@@ -859,13 +890,13 @@ Definition rank_composite (mcd: mycomposite_definition) : nat :=
   match mcd with
   | MCDstruct l => rank_mymembervars l
   | MCDunion l => rank_mymembervars l
-  | MCDclass (Some pid) li l1 l2 =>
+  | MCDclass (Some pid) li l1 l2 ca =>
     match ce ! pid with
     | Some co => S (Peano.max co.(co_rank) (rank_mymembervars l1))
     | None => 0
     end
-  | MCDclass None li l1 l2 => S (rank_mymembervars l1)
-  | MCDinterface li l1 l2 => S (rank_mymembervars l1)
+  | MCDclass None li l1 l2 ca => S (rank_mymembervars l1)
+  | MCDinterface li l1 l2 ia => S (rank_mymembervars l1)
   end.
 
 (** ** Byte offset for a field of a structure *)
@@ -909,7 +940,7 @@ Qed.*)
 Fixpoint search_in_mymembervars_struct (l: mymembervars) (fi: positive) (cur: Z) : res (mytype * N * Z) :=
   match l with
   | MMVnil => Error (MSG "field-id" :: CTX fi :: nil)
-  | MMVcons _ mt (_, ta) _ l' =>
+  | MMVcons _ mt ta _ l' =>
     let n := N_to_positive (N.succ (maxfield mt)) in
     match Pos.leb fi n with
     | true => OK (mt, N.pred (Npos fi), align cur (alignof mt ta))
@@ -936,7 +967,7 @@ Lemma search_in_mymembervars_struct_decrease_field:
 Proof.
   intros l. induction l; intros; simpl in *.
   - inversion H.
-  - destruct v. destruct (fi <=? N_to_positive (N.succ (maxfield m))) % positive eqn: E.
+  - destruct (fi <=? N_to_positive (N.succ (maxfield m))) % positive eqn: E.
     + inversion H; subst. rewrite N.pos_pred_spec. apply N.lt_pred_l. congruence.
     + apply IHl in H. eapply N.lt_trans; eauto. unfold N.lt. simpl.
       apply Pos.leb_gt in E. apply Pos.sub_decr. auto.
@@ -945,10 +976,10 @@ Qed.
 Fixpoint search_in_mymembervars_union (l: mymembervars) (fi: positive) (cur: Z) : res (mytype * N * Z) :=
   match l with
   | MMVnil => Error (MSG "field-id" :: CTX fi :: nil)
-  | MMVcons _ mt (_, al) _ l' =>
+  | MMVcons _ mt ta _ l' =>
     let n := N_to_positive (N.succ (maxfield mt)) in
     match Pos.leb fi n with
-    | true => OK (mt, N.pred (Npos fi), align cur (alignof mt al))
+    | true => OK (mt, N.pred (Npos fi), align cur (alignof mt ta))
     | false => search_in_mymembervars_union l' (Pos.sub fi n) cur
     end
   end.
@@ -972,7 +1003,7 @@ Lemma search_in_mymembervars_union_decrease_field:
 Proof.
   intros l. induction l; intros; simpl in *.
   - inversion H.
-  - destruct v. destruct (fi <=? N_to_positive (N.succ (maxfield m))) % positive eqn: E.
+  - destruct (fi <=? N_to_positive (N.succ (maxfield m))) % positive eqn: E.
     + inversion H; subst. rewrite N.pos_pred_spec. apply N.lt_pred_l. congruence.
     + apply IHl in H. eapply N.lt_trans; eauto. unfold N.lt. simpl.
       apply Pos.leb_gt in E. apply Pos.sub_decr. auto.
@@ -986,7 +1017,7 @@ Program Definition fieldoffset_step (mt: mytype) (fi: positive) (cur: Z) : res (
       match co.(co_def) with
       | MCDstruct l => search_in_mymembervars_struct l fi 0
       | MCDunion l => search_in_mymembervars_struct l fi 0
-      | MCDclass (Some pid) li l1 l2 =>
+      | MCDclass (Some pid) li l1 l2 ca =>
         match ce ! pid with
         | Some pco =>
           let n := N_to_positive (N.succ pco.(co_maxfield)) in
@@ -996,8 +1027,8 @@ Program Definition fieldoffset_step (mt: mytype) (fi: positive) (cur: Z) : res (
           end
         | None => Error (MSG "unknown class name" :: CTX pid :: nil)
         end
-      | MCDclass None li l1 l2 => search_in_mymembervars_struct l1 fi 0
-      | MCDinterface li l1 l2 => search_in_mymembervars_struct l1 fi 0
+      | MCDclass None li l1 l2 ca => search_in_mymembervars_struct l1 fi 0
+      | MCDinterface li l1 l2 ia => search_in_mymembervars_struct l1 fi 0
       end
     | None => Error (MSG "unknown type name " :: CTX id :: nil)
     end
@@ -1033,7 +1064,7 @@ Proof.
   - apply search_in_mymembervars_struct_decrease_field in H; auto.
   - destruct o eqn: E3.
     + destruct ce ! i0 eqn: E4; simpl in *; try congruence.
-      destruct (fi <=? N_to_positive (N.succ (co_maxfield c0)))%positive eqn: E5.
+      destruct (fi <=? N_to_positive (N.succ (co_maxfield c1)))%positive eqn: E5.
       * inversion H; subst. rewrite N.pos_pred_spec.
         apply N.lt_pred_l. congruence.
       * apply search_in_mymembervars_struct_decrease_field in H.
@@ -1358,16 +1389,54 @@ Fixpoint complete_mymembervars (l: mymembervars) : bool :=
 Fixpoint complete_mymemberfuncs (l: mymemberfuncs) : bool :=
   match l with
   | MMFnil => true
-  | MMFcons _ _ mt _ _ l' => complete_mytype mt && complete_mymemberfuncs l'
+  | MMFcons _ _ mt _ l' => complete_mytype mt && complete_mymemberfuncs l'
+  end.
+
+Definition valid_superclass_id (id: ident) : bool :=
+  match ce ! id with
+  | Some co =>
+    match co_def co with
+    | MCDclass _ _ _ _ ca => negb (ca_final ca)
+    | _ => false
+    end
+  | None => false
+  end.
+
+Definition valid_interface_id (id: ident) : bool :=
+  match ce ! id with
+  | Some co =>
+    match co_def co with
+    | MCDinterface _ _ _ _ => true
+    | _ => false
+    end
+  | None => false
+  end.
+
+Fixpoint valid_interface_idlist (l: list ident) : bool :=
+  match l with
+  | nil => true
+  | id :: l' =>
+    valid_interface_id id && valid_interface_idlist l'
   end.
 
 Fixpoint complete_composite (mcd: mycomposite_definition) : bool :=
   match mcd with
   | MCDstruct l => complete_mymembervars l
   | MCDunion l => complete_mymembervars l
-  | MCDclass (Some pid) li l1 l2 => complete_id pid && complete_idlist li && complete_mymembervars l1 && complete_mymemberfuncs l2
-  | MCDclass None li l1 l2 => complete_idlist li && complete_mymembervars l1 && complete_mymemberfuncs l2
-  | MCDinterface li l1 l2 => complete_idlist li && complete_mymembervars l1 && complete_mymemberfuncs l2
+  | MCDclass (Some pid) li l1 l2 ca =>
+    valid_superclass_id pid &&
+    valid_interface_idlist li &&
+    complete_mymembervars l1 &&
+    complete_mymemberfuncs l2
+  | MCDclass None li l1 l2 ca =>
+    valid_interface_idlist li &&
+    complete_mymembervars l1 &&
+    complete_mymemberfuncs l2
+  | MCDinterface li l1 l2 ia =>
+    (ia_abstract ia) &&
+    valid_interface_idlist li &&
+    complete_mymembervars l1 &&
+    complete_mymemberfuncs l2
   end.
 (*
 Lemma complete_member:
@@ -1452,17 +1521,100 @@ Section build_composite_env.
 
 Variable te: PTree.t mytype.
 
-Fixpoint add_composite_definitions (ce: composite_env) (l: list (ident * composite_definition)) : res composite_env :=
+Fixpoint id_used_by_mytype (mt: mytype) : option ident :=
+  match mt with
+  | MTprim _ => None
+  | MTpointer _ => None
+  | MTarray mt _ => id_used_by_mytype mt
+  | MTfunction _ _ => None
+  | MTcomposite id => Some id
+  end.
+
+(*Fixpoint idlist_used_by_mytypelist (mtl: mytypelist) : list ident :=
+  match mtl with
+  | MTnil => nil
+  | MTcons mt mtl' =>
+    match id_used_by_mytype mt with
+    | Some id => id :: idlist_used_by_mytypelist mtl'
+    | None => idlist_used_by_mytypelist mtl'
+    end
+  end.*)
+
+Fixpoint idlist_used_by_mymembervars (mmv: mymembervars) : list ident :=
+  match mmv with
+  | MMVnil => nil
+  | MMVcons _ mt _ _ mmv' =>
+    match id_used_by_mytype mt with
+    | Some id => id :: idlist_used_by_mymembervars mmv'
+    | None => idlist_used_by_mymembervars mmv'
+    end
+  end.
+
+Definition idlist_used_by_mycomposite_definition (mcd: mycomposite_definition) : list ident :=
+  match mcd with
+  | MCDstruct mmv => idlist_used_by_mymembervars mmv
+  | MCDunion mmv => idlist_used_by_mymembervars mmv
+  | MCDclass (Some pid) lid mmv _ _ =>
+    pid :: lid ++ idlist_used_by_mymembervars mmv
+  | MCDclass None lid mmv _ _ =>
+    lid ++ idlist_used_by_mymembervars mmv
+  | MCDinterface lid mmv _ _ =>
+    lid ++ idlist_used_by_mymembervars mmv
+  end.
+
+Definition add_node_edges (g: graph) (x: ident * mycomposite_definition) : graph :=
+  let (id, mcd) := x in
+  fold_left (fun g0 id0 => add_edge g0 id0 id) (idlist_used_by_mycomposite_definition mcd) (add_node g id).
+
+Definition init_graph (l: list (ident * mycomposite_definition)) : graph :=
+  fold_left add_node_edges l empty_graph.
+
+Definition build_mycomposite_definition_env (l: list (ident * mycomposite_definition)) : PTree.t mycomposite_definition :=
+  fold_left (fun s x => PTree.set (fst x) (snd x) s) l (PTree.empty mycomposite_definition).
+
+Fixpoint reorder_mycomposite_definitions
+           (e: PTree.t mycomposite_definition)
+           (idl: list ident)
+  : res (list (ident * mycomposite_definition)) :=
+  match idl with
+  | nil => OK nil
+  | id :: idl' =>
+    match e ! id with
+    | Some mcd =>
+      match reorder_mycomposite_definitions e idl' with
+      | OK l => OK ((id, mcd) :: l)
+      | Error msg => Error msg
+      end
+    | None =>
+      Error (MSG "no such composite" :: CTX id :: nil)
+    end
+  end.
+
+Definition toposort (l: list (ident * mycomposite_definition))
+  : res (list (ident * mycomposite_definition)) :=
+  let e := build_mycomposite_definition_env l in
+  let idl := naive_topological_sort (init_graph l) in
+  match Z.compare (list_length_z idl) (list_length_z l) with
+  | Eq => reorder_mycomposite_definitions e idl
+  | Lt =>
+    Error (MSG "There are loops in class hierarchy" :: nil)
+  | Gt =>
+    Error (MSG "Error in topological sort!" :: nil)
+  end.
+
+Fixpoint add_composite_definitions (ce: composite_env) (l: list (ident * mycomposite_definition)) : res composite_env :=
   match l with
   | nil => OK ce
-  | (id, cd) :: l' =>
-    do mcd <- composite_definition_to_mycomposite_definition te cd;
-      do co <- composite_of_def ce id mcd;
-      add_composite_definitions (PTree.set id co ce) l'
+  | (id, mcd) :: l' =>
+    do co <- composite_of_def ce id mcd;
+    add_composite_definitions (PTree.set id co ce) l'
   end.
 
 Definition build_composite_env (l: list (ident * composite_definition)) :=
-  add_composite_definitions (PTree.empty _) l.
+  do l' <- composite_definitions_to_mycomposite_definitions te l;
+  do l'' <- toposort l';
+  add_composite_definitions (PTree.empty _) l''.
+
 End build_composite_env.
 (*
 (** Stability properties for alignments, sizes, and ranks.  If the type is
