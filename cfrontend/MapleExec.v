@@ -21,8 +21,6 @@ Section Eval_ext_expr.
 
 Variable le:  lenv.
 
-Variable thrownval: option (val * prim_type).
-
 Section Eval_expr.
 
 Variable m: mem.
@@ -91,7 +89,7 @@ Function eval_expr (e: expr) {struct e} : option val :=
     | _ => None
     end
   | E_regread pt' rid =>
-    match find_reg le thrownval rid with
+    match find_reg le rid with
     | Some (v, pt) =>
       sem_cast v (MTprim pt) (MTprim pt') m (genv_cenv ge)
     | None => None
@@ -299,10 +297,10 @@ Qed.
 
 Lemma eval_expr_sound: forall e v,
     eval_expr e = Some v ->
-    Maple.eval_expr ge le thrownval m e v
+    Maple.eval_expr ge le m e v
 with eval_exprlist_sound: forall el vl,
     eval_exprlist el = Some vl ->
-    Maple.eval_exprlist ge le thrownval m el vl.
+    Maple.eval_exprlist ge le m el vl.
 Proof.
   intros e. (*clear eval_expr_sound.*)
   induction e; simpl in *; intros; try congruence.
@@ -314,7 +312,7 @@ Proof.
     destruct (deref_loc m2 m b (Ptrofs.repr z)) eqn: E7; try congruence.
     econstructor; eauto.
   - (* E_regread *)
-    destruct (find_reg le thrownval r) eqn: E1; try congruence.
+    destruct (find_reg le r) eqn: E1; try congruence.
     destruct p0 eqn: E2. eapply eval_Eregread; eauto.
   - (* E_iread *)
     destruct (eval_expr e) eqn: E1; try congruence.
@@ -440,10 +438,10 @@ Proof.
 Qed.
 
 Lemma eval_expr_complete: forall e v,
-    Maple.eval_expr ge le thrownval m e v ->
+    Maple.eval_expr ge le m e v ->
     eval_expr e = Some v
 with eval_exprlist_complete: forall el vl,
-    Maple.eval_exprlist ge le thrownval m el vl ->
+    Maple.eval_exprlist ge le m el vl ->
     eval_exprlist el = Some vl.
 Proof.
   intros. induction H; simpl in *; auto.
@@ -549,7 +547,7 @@ Definition eval_ext_expr (ee_oe_m: ext_expr * oenv * mem) : option (val * oenv *
 
 Lemma eval_ext_expr_sound: forall ee oe m v oe' m',
     eval_ext_expr (ee, oe, m) = Some (v, oe', m') ->
-    Maple.eval_ext_expr ge le thrownval (ee, oe, m) (v, oe', m').
+    Maple.eval_ext_expr ge le (ee, oe, m) (v, oe', m').
 Proof.
   Hint Resolve eval_expr_sound: core.
   intros. destruct ee; simpl in *; auto.
@@ -585,7 +583,7 @@ Proof.
 Qed.
 
 Lemma eval_ext_expr_complete: forall ee oe m v oe' m',
-    Maple.eval_ext_expr ge le thrownval (ee, oe, m) (v, oe', m') ->
+    Maple.eval_ext_expr ge le (ee, oe, m) (v, oe', m') ->
     eval_ext_expr (ee, oe, m) = Some (v, oe', m').
 Proof.
   intros. induction H; simpl in *; subst; auto.
@@ -602,20 +600,20 @@ Qed.
 
 End Eval_ext_expr.
 
-Fixpoint step (st: state) : option state :=
+Definition step (st: state) : option state :=
   match st with
-  | NormalState f (S_dassign vid fi e) th k le oe m =>
+  | NormalState f (S_dassign vid fi e) k le oe m =>
     match find_var ge le vid with
     | Some (loc, (mt, (sc, ta))) =>
       match fieldoffset (genv_cenv ge) mt fi with
       | OK (mt', ofs) =>
-        match eval_ext_expr le th (e, oe, m) with
+        match eval_ext_expr le (e, oe, m) with
         | Some (v, oe', m') =>
           match sem_cast v (mytypeof_ext_expr e) mt' m' (genv_cenv ge) with
           | Some v' =>
             match assign_loc (genv_cenv ge) mt' ta m' loc (Ptrofs.repr ofs) v' with
             | Some m'' =>
-              Some (NormalState f S_skip th k le oe' m'')
+              Some (NormalState f S_skip k le oe' m'')
             | None => None
             end
           | None => None
@@ -626,22 +624,22 @@ Fixpoint step (st: state) : option state :=
       end
     | None => None
     end
-  | NormalState f (S_iassign ty fi e1 e2) th k le oe m =>
+  | NormalState f (S_iassign ty fi e1 e2) k le oe m =>
     match type_to_mytype (genv_mytypes ge) ty with
     | OK mt =>
-      match eval_expr le th m e1 with
+      match eval_expr le m e1 with
       | Some (Vptr loc ofs) =>
         match mt with
         | MTpointer mt' =>
           match fieldoffset (genv_cenv ge) mt' fi with
           | OK (mt'', delta) =>
-            match eval_ext_expr le th (e2, oe, m) with
+            match eval_ext_expr le (e2, oe, m) with
             | Some (v, oe', m') =>
               match sem_cast v (mytypeof_ext_expr e2) mt'' m' (genv_cenv ge) with
               | Some v' =>
                 match assign_loc (genv_cenv ge) mt'' default_type_attr m' loc (Ptrofs.add ofs (Ptrofs.repr delta)) v' with
                 | Some m'' =>
-                  Some (NormalState f S_skip th k le oe' m'')
+                  Some (NormalState f S_skip k le oe' m'')
                 | None => None
                 end
               | None => None
@@ -656,79 +654,89 @@ Fixpoint step (st: state) : option state :=
       end
     | Error _ => None
     end
-  | NormalState f (S_regassign pt (Preg id) e) th k le oe m =>
+  | NormalState f (S_regassign pt (Preg id) e) k le oe m =>
     match find_preg le id with
     | Some (v0, pt') =>
       if prim_type_eq pt pt' then
-        match eval_ext_expr le th (e, oe, m) with
+        match eval_ext_expr le (e, oe, m) with
         | Some (v, oe', m') =>
           match sem_cast v (mytypeof_ext_expr e) (MTprim pt) m' (genv_cenv ge) with
           | Some v' =>
-            Some (NormalState f S_skip th k (set_preg le id pt v') oe' m')
+            Some (NormalState f S_skip k (set_preg le id v' pt) oe' m')
           | None => None
           end
         | None => None
         end
       else None
     | None =>
-      match eval_ext_expr le th (e, oe, m) with
+      match eval_ext_expr le (e, oe, m) with
       | Some (v, oe', m') =>
         match sem_cast v (mytypeof_ext_expr e) (MTprim pt) m' (genv_cenv ge) with
         | Some v' =>
-          Some (NormalState f S_skip th k (set_preg le id pt v') oe' m')
+          Some (NormalState f S_skip k (set_preg le id v' pt) oe' m')
         | None => None
         end
       | None => None
       end
     end
-  | NormalState f (S_regassign pt Thrownval e) th k le oe m =>
-    match eval_ext_expr le th (e, oe, m) with
+  | NormalState f (S_regassign pt Thrownval e) k le oe m =>
+    match eval_ext_expr le (e, oe, m) with
     | Some (v, oe', m') =>
       match sem_cast v (mytypeof_ext_expr e) (MTprim pt) m' (genv_cenv ge) with
       | Some v' =>
-        Some (NormalState f S_skip (Some (v', pt)) k le oe' m')
+        Some (NormalState f S_skip k (set_thrownval le v' pt) oe' m')
       | None => None
       end
     | None => None
     end
-  | NormalState f (S_seq s1 s2) th k le oe m =>
-    Some (NormalState f s1 th (Kseq s2 k) le oe m)
-  | NormalState f S_skip th (Kseq s k) le oe m =>
-    Some (NormalState f s th k le oe m)
-  | NormalState f (S_if e s1 s2) th k le oe m =>
-    match eval_expr le th m e with
+  | NormalState f (S_seq s1 s2) k le oe m =>
+    Some (NormalState f s1 (Kseq s2 k) le oe m)
+  | NormalState f S_skip (Kseq s k) le oe m =>
+    Some (NormalState f s k le oe m)
+  | NormalState f (S_if e s1 s2) k le oe m =>
+    match eval_expr le m e with
     | Some v =>
       match bool_val v (mytypeof e) m with
       | Some b =>
-        Some (NormalState f (if b then s1 else s2) th k le oe m)
+        Some (NormalState f (if b then s1 else s2) k le oe m)
       | None => None
       end
     | None => None
     end
-  | NormalState f (S_while e s) th k le oe m =>
-    Some (NormalState f (S_if e (S_seq s (S_while e s)) S_skip) th k le oe m)
-  | NormalState f S_skip th (Kwhile e s k) le oe m =>
-    Some (NormalState f (S_while e s) th k le oe m)
-  | NormalState f (S_label lbl s) th k le oe m =>
-    Some (NormalState f s th k le oe m)
-  | NormalState f (S_goto lbl) th k le oe m =>
+  | NormalState f (S_while e s) k le oe m =>
+    Some (NormalState f (S_if e (S_seq s (S_while e s)) S_skip) k le oe m)
+  | NormalState f S_skip (Kwhile e s k) le oe m =>
+    Some (NormalState f (S_while e s) k le oe m)
+  | NormalState f (S_label lbl s) k le oe m =>
+    Some (NormalState f s k le oe m)
+  | NormalState f (S_goto lbl) k le oe m =>
     match find_label lbl (fun_statement (snd f)) (call_cont k) with
     | Some (s', k') =>
-      Some (NormalState f s' th k' le oe m)
+      Some (NormalState f s' k' le oe m)
     | None => None
     end
-  | NormalState f (S_switch e dl ll) th k le oe m =>
-    match eval_expr le th m e with
+  | NormalState f (S_switch e dl ll) k le oe m =>
+    match eval_expr le m e with
     | Some v =>
       match sem_switch_arg v (mytypeof e) with
       | Some n =>
-        Some (NormalState f (S_goto (select_switch n dl ll)) th k le oe m)
+        Some (NormalState f (S_goto (select_switch n dl ll)) k le oe m)
       | None => None
       end
     | None => None
     end
-  | NormalState f (S_return el) th k le oe m =>
-    match eval_exprlist le th m el with
+  | NormalState f (S_return el) k le oe m =>
+    match eval_exprlist le m el with
+    | Some nil =>
+      match (type_of_returns (fun_returns (fst f))) with
+      | Tnil | Tcons (Tprim PTvoid) Tnil =>
+        match Mem.free_list m (blocks_of_lenv ge le) with
+        | Some m' =>
+          Some (ReturnState nil (call_cont k) oe m')
+        | None => None
+        end
+      | _ => None
+      end
     | Some vl =>
       match typelist_to_mytypelist (genv_mytypes ge) (type_of_returns (fun_returns (fst f))) with
       | OK mtl' =>
@@ -745,7 +753,7 @@ Fixpoint step (st: state) : option state :=
       end
     | None => None
     end
-  | NormalState f S_skip th k le oe m =>
+  | NormalState f S_skip k le oe m =>
     if is_call_cont k then
       match type_of_returns (fun_returns (fst f)) with
       | Tnil =>
@@ -757,8 +765,8 @@ Fixpoint step (st: state) : option state :=
       | _ => None
       end
     else None
-  | NormalState f (S_callassigned (Func fid) el l) th k le oe m =>
-    match eval_exprlist le th m el with
+  | NormalState f (S_callassigned (Func fid) el l) k le oe m =>
+    match eval_exprlist le m el with
     | Some vl =>
       match find_function_by_name ge fid with
       | Some (loc, f') =>
@@ -775,10 +783,10 @@ Fixpoint step (st: state) : option state :=
       end
     | None => None
     end
-  | NormalState f (S_virtualcallassigned cid fid e el l) th k le oe m =>
-    match eval_expr le th m e with
+  | NormalState f (S_virtualcallassigned cid fid e el l) k le oe m =>
+    match eval_expr le m e with
     | Some v =>
-      match eval_exprlist le th m el with
+      match eval_exprlist le m el with
       | Some vl =>
         match resolve_ref oe v with
         | Some (MTcomposite cid') =>
@@ -807,10 +815,10 @@ Fixpoint step (st: state) : option state :=
       end
     | None => None
     end
-  | NormalState f (S_interfacecallassigned cid fid e el l) th k le oe m =>
-    match eval_expr le th m e with
+  | NormalState f (S_interfacecallassigned cid fid e el l) k le oe m =>
+    match eval_expr le m e with
     | Some v =>
-      match eval_exprlist le th m el with
+      match eval_exprlist le m el with
       | Some vl =>
         match resolve_ref oe v with
         | Some (MTcomposite cid') =>
@@ -839,11 +847,11 @@ Fixpoint step (st: state) : option state :=
       end
     | None => None
     end
-  | NormalState f (S_icallassigned e el l) th k le oe m =>
-    match eval_expr le th m e with
+  | NormalState f (S_icallassigned e el l) k le oe m =>
+    match eval_expr le m e with
     | Some (Vptr loc ofs) =>
       if Ptrofs.eq_dec ofs Ptrofs.zero then
-        match eval_exprlist le th m el with
+        match eval_exprlist le m el with
         | Some vl =>
           match find_function_by_address ge loc with
           | Some f' =>
@@ -863,32 +871,36 @@ Fixpoint step (st: state) : option state :=
       else None
     | _ => None
     end
-  | NormalState f (S_javatry ll s) th k le oe m =>
-    Some (NormalState f s th (Kjavatry ll k) le oe m)
-  | ExceptionState f (v, mt) k le oe m =>
-    match catch_cont k with
-    | Kjavatry ll k1 =>
-      match find_handler ge (resolve_type oe v mt) ll (fun_statement (snd f)) (call_cont k1) with
-      | Some k3 =>
-        Some (NormalState f S_skip (Some (v, mt)) k3 le oe m)
-      | None => Some (ExceptionState f (v, mt) k1 le oe m)
+  | NormalState f (S_javatry ll s) k le oe m =>
+    Some (NormalState f s (Kjavatry ll k) le oe m)
+  | ExceptionState f k le oe m =>
+    match find_thrownval le with
+    | Some (v, mt) =>
+      match catch_cont k with
+      | Kjavatry ll k1 =>
+        match find_handler ge (resolve_type oe v mt) ll (fun_statement (snd f)) (call_cont k1) with
+        | Some k3 =>
+          Some (NormalState f S_skip k3 le oe m)
+        | None => Some (ExceptionState f k1 le oe m)
+        end
+      | Kcall l f' le' k1 =>
+        match Mem.free_list m (blocks_of_lenv ge le) with
+        | Some m' =>
+          Some (ExceptionState f' k1 le' oe m')
+        | None => None
+        end
+      | _ => None
       end
-    | Kcall l f' le' k1 =>
-      match Mem.free_list m (blocks_of_lenv ge le) with
-      | Some m' =>
-        Some (ExceptionState f' (v, mt) k1 le' oe m')
-      | None => None
-      end
-    | _ => None
-    end
-  | NormalState f (S_throw e) th k le oe m =>
-    match eval_expr le th m e with
-    | Some v =>
-      Some (ExceptionState f (v, (prim_type_of e)) k le oe m)
     | None => None
     end
-  | NormalState f (S_free e) th k le oe m =>
-    match eval_expr le th m e as v with
+  | NormalState f (S_throw e) k le oe m =>
+    match eval_expr le m e with
+    | Some v =>
+      Some (ExceptionState f k (set_thrownval le v (prim_type_of e)) oe m)
+    | None => None
+    end
+  | NormalState f (S_free e) k le oe m =>
+    match eval_expr le m e as v with
     | Some (Vptr b lo) =>
       match Mem.load Mptr m b (Ptrofs.unsigned lo - size_chunk Mptr) with
       | Some v =>
@@ -898,7 +910,7 @@ Fixpoint step (st: state) : option state :=
           | Gt =>
             match Mem.free m b (Ptrofs.unsigned lo - size_chunk Mptr) (Ptrofs.unsigned lo + Ptrofs.unsigned sz) with
             | Some m' =>
-              Some (NormalState f S_skip th k le oe m')
+              Some (NormalState f S_skip k le oe m')
             | None => None
             end
           | _ => None
@@ -909,23 +921,23 @@ Fixpoint step (st: state) : option state :=
       end
     | Some (Vint i) =>
       if negb Archi.ptr64 && Int.eq_dec i Int.zero then
-        Some (NormalState f S_skip th k le oe m)
+        Some (NormalState f S_skip k le oe m)
       else None
     | Some (Vlong i) =>
       if Archi.ptr64 && Int64.eq_dec i Int64.zero then
-        Some (NormalState f S_skip th k le oe m)
+        Some (NormalState f S_skip k le oe m)
       else None
     | _ => None
     end
-  | NormalState f (S_incref e) th k le oe m =>
+  | NormalState f (S_incref e) k le oe m =>
     match prim_type_of e with
     | PTref =>
-      match eval_expr le th m e with
+      match eval_expr le m e with
       | Some (Vptr loc ofs) =>
         if Ptrofs.eq_dec ofs (Ptrofs.repr 0) then
           match oe ! loc with
           | Some (mt, n, b) =>
-            Some (NormalState f S_skip th k le (PTree.set loc (mt, S n, b) oe) m)
+            Some (NormalState f S_skip k le (PTree.set loc (mt, S n, b) oe) m)
           | None => None
           end
         else None
@@ -933,15 +945,15 @@ Fixpoint step (st: state) : option state :=
       end
     | _ => None
     end
-  | NormalState f (S_decref e) th k le oe m =>
+  | NormalState f (S_decref e) k le oe m =>
     match prim_type_of e with
     | PTref =>
-      match eval_expr le th m e with
+      match eval_expr le m e with
       | Some (Vptr loc ofs) =>
         if Ptrofs.eq_dec ofs (Ptrofs.repr 0) then
           match oe ! loc with
           | Some (mt, n, b) =>
-            Some (NormalState f S_skip th k le (PTree.set loc (mt, pred n, b) oe) m)
+            Some (NormalState f S_skip k le (PTree.set loc (mt, pred n, b) oe) m)
           | None => None
           end
         else None
@@ -949,10 +961,10 @@ Fixpoint step (st: state) : option state :=
       end
     | _ => None
     end
-  | NormalState f (S_eval e) th k le oe m =>
-    match eval_expr le th m e with
+  | NormalState f (S_eval e) k le oe m =>
+    match eval_expr le m e with
     | Some v =>
-      Some (NormalState f S_skip th k le oe m)
+      Some (NormalState f S_skip k le oe m)
     | None => None
     end
   | CallState f vl k oe m =>
@@ -960,7 +972,7 @@ Fixpoint step (st: state) : option state :=
     | (fp, Some fb) =>
       match function_entry ge (fp, fb) m vl with
       | Some (le, m') =>
-        Some (NormalState (fp, fb) (fun_statement fb) None k le oe m')
+        Some (NormalState (fp, fb) (fun_statement fb) k le oe m')
       | None => None
       end
     | (_, None) => None
@@ -968,10 +980,10 @@ Fixpoint step (st: state) : option state :=
   | ReturnState vl (Kcall l f le k) oe m =>
     match assign_returns ge le l vl m with
     | Some m' =>
-      Some (NormalState f S_skip None k le oe m')
+      Some (NormalState f S_skip k le oe m')
     | None => None
     end
-  | NormalState _ (S_javacatch _ _) _ _ _ _ _ => None
+  | NormalState _ (S_javacatch _ _) _ _ _ _ => None
   | ReturnState _ _ _ _ => None
   (*| _ => None*)
   end.
@@ -1001,19 +1013,19 @@ Proof.
       destruct p as [loc [mt [sc ta]]]; try congruence.
       destruct (fieldoffset (genv_cenv ge) mt f0) eqn: E2; try congruence.
       destruct p; try congruence.
-      destruct (eval_ext_expr le th (rhs_expr, oe, m)) eqn: E3; try congruence.
+      destruct (eval_ext_expr le (rhs_expr, oe, m)) eqn: E3; try congruence.
       destruct p as [[v' oe'] m']; try congruence.
       destruct (sem_cast v' (mytypeof_ext_expr rhs_expr) m0 m' (genv_cenv ge)) eqn: E4; try congruence.
       destruct (assign_loc (genv_cenv ge) m0 ta m' loc (Ptrofs.repr z) v0) eqn: E5; try congruence.
       inversion H; subst; eauto.
     + (* S_iassign *)
       destruct (type_to_mytype (genv_mytypes ge) t) eqn: E1; try congruence.
-      destruct (eval_expr le th m addr_expr) eqn: E2; try congruence.
+      destruct (eval_expr le m addr_expr) eqn: E2; try congruence.
       destruct v; try congruence.
       destruct m0; try congruence.
       destruct (fieldoffset (genv_cenv ge) m0 f0) eqn: E3; try congruence.
       destruct p; try congruence.
-      destruct (eval_ext_expr le th (rhs_expr, oe, m)) eqn: E4; try congruence.
+      destruct (eval_ext_expr le (rhs_expr, oe, m)) eqn: E4; try congruence.
       destruct p as [[v' oe'] m']; try congruence.
       destruct (sem_cast v' (mytypeof_ext_expr rhs_expr) m1 m' (genv_cenv ge)) eqn: E5; try congruence.
       destruct (assign_loc (genv_cenv ge) m1 default_type_attr m' b  (Ptrofs.add i (Ptrofs.repr z)) v) eqn: E6; try congruence.
@@ -1024,17 +1036,17 @@ Proof.
       * (* existing preg *)
         destruct p; try congruence.
         destruct (prim_type_eq t p); try congruence.
-        destruct (eval_ext_expr le th (rhs_expr, oe, m)) eqn: E2; try congruence.
+        destruct (eval_ext_expr le (rhs_expr, oe, m)) eqn: E2; try congruence.
         destruct p0 as [[v' oe'] m']; try congruence.
         destruct (sem_cast v' (mytypeof_ext_expr rhs_expr) (MTprim t) m' (genv_cenv ge)) eqn: E3; try congruence.
         inversion H; subst; eauto.
       * (* fresh preg *)
-        destruct (eval_ext_expr le th (rhs_expr, oe, m)) eqn: E2; try congruence.
+        destruct (eval_ext_expr le (rhs_expr, oe, m)) eqn: E2; try congruence.
         destruct p as [[v' oe'] m']; try congruence.
         destruct (sem_cast v' (mytypeof_ext_expr rhs_expr) (MTprim t) m' (genv_cenv ge)) eqn: E3; try congruence.
         inversion H; subst; eauto.
       * (* thrownval *)
-        destruct (eval_ext_expr le th (rhs_expr, oe, m)) eqn: E2; try congruence.
+        destruct (eval_ext_expr le (rhs_expr, oe, m)) eqn: E2; try congruence.
         destruct p as [[v' oe'] m']; try congruence.
         destruct (sem_cast v' (mytypeof_ext_expr rhs_expr) (MTprim t) m' (genv_cenv ge)) eqn: E3; try congruence.
         inversion H; subst; eauto.
@@ -1043,7 +1055,7 @@ Proof.
     + (* S_label *)
       inversion H; subst; eauto.
     + (* S_if *)
-      destruct (eval_expr le th m cond_expr) eqn: E1; try congruence.
+      destruct (eval_expr le m cond_expr) eqn: E1; try congruence.
       destruct (bool_val v (mytypeof cond_expr) m) eqn: E2; try congruence.
       inversion H; subst; eauto.
     + (* S_while *)
@@ -1053,35 +1065,44 @@ Proof.
       destruct p.
       inversion H; subst; eauto.
     + (* S_return *)
-      destruct (eval_exprlist le th m retlist) eqn: E1; try congruence.
-      destruct (typelist_to_mytypelist (genv_mytypes ge) (type_of_returns (fun_returns (fst f)))) eqn: E2; try congruence.
-      destruct (sem_cast_list ge l (mytypelistof retlist) m0 m) eqn: E3; try congruence.
-      destruct (Mem.free_list m (blocks_of_lenv ge le)) eqn: E4; try congruence.
-      inversion H; subst; eauto.
+      destruct (eval_exprlist le m retlist) eqn: E1; try congruence.
+      destruct l.
+      * destruct (type_of_returns (fun_returns (fst f))) eqn: E2; try congruence.
+        destruct (Mem.free_list m (blocks_of_lenv ge le)) eqn: E4; try congruence.
+        inversion H; subst; eauto.
+        destruct t; try congruence. destruct p; try congruence.
+        destruct t0; try congruence.
+        destruct (Mem.free_list m (blocks_of_lenv ge le)) eqn: E4; try congruence.
+        inversion H; subst; eauto.
+      * destruct (typelist_to_mytypelist (genv_mytypes ge) (type_of_returns (fun_returns (fst f)))) eqn: E2; try congruence.
+        destruct (sem_cast_list ge (v :: l) (mytypelistof retlist) m0 m) eqn: E3; try congruence.
+        destruct (Mem.free_list m (blocks_of_lenv ge le)) eqn: E4; try congruence.
+        inversion H; subst. econstructor; eauto.
+        intro. congruence.
     + (* S_switch *)
-      destruct (eval_expr le th m opnd) eqn: E1; try congruence.
+      destruct (eval_expr le m opnd) eqn: E1; try congruence.
       destruct (sem_switch_arg v (mytypeof opnd)) eqn: E2; try congruence.
       inversion H; subst; eauto.
     + (* S_callassigned *)
       destruct f0.
-      destruct (eval_exprlist le th m opndlist) eqn: E1; try congruence.
+      destruct (eval_exprlist le m opndlist) eqn: E1; try congruence.
       destruct (find_function_by_name ge i) eqn: E2; try congruence.
       destruct p.
       destruct (typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params (fst f0)))) eqn: E3; try congruence.
       destruct (sem_cast_list ge l (mytypelistof opndlist) m0 m) eqn: E4; try congruence.
       inversion H; subst; eauto.
     + (* S_icallassigned *)
-      destruct (eval_expr le th m f_ptr) eqn: E1; try congruence.
+      destruct (eval_expr le m f_ptr) eqn: E1; try congruence.
       destruct v; try congruence.
       destruct (Ptrofs.eq_dec i Ptrofs.zero); try congruence.
-      destruct (eval_exprlist le th m opndlist) eqn: E2; try congruence.
+      destruct (eval_exprlist le m opndlist) eqn: E2; try congruence.
       destruct (find_function_by_address ge b) eqn: E3; try congruence.
       destruct (typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params (fst f0)))) eqn: E4; try congruence.
       destruct (sem_cast_list ge l (mytypelistof opndlist) m0 m) eqn: E5; try congruence.
       inversion H; subst; eauto.
     + (* S_virtualcallassigned *)
-      destruct (eval_expr le th m obj_ptr) eqn: E1; try congruence.
-      destruct (eval_exprlist le th m opndlist) eqn: E2; try congruence.
+      destruct (eval_expr le m obj_ptr) eqn: E1; try congruence.
+      destruct (eval_exprlist le m opndlist) eqn: E2; try congruence.
       destruct (resolve_ref oe v) eqn: E3; try congruence.
       destruct m0; try congruence.
       destruct (in_dec ident_eq c (superclasses_id (genv_cenv ge) i)); try congruence.
@@ -1092,8 +1113,8 @@ Proof.
       destruct (sem_cast_list ge (v :: l) (mytypelistof (E_cons obj_ptr opndlist)) m0 m) eqn: E7; try congruence.
       inversion H; subst; eauto.
     + (* S_interfacecallassigned *)
-      destruct (eval_expr le th m obj_ptr) eqn: E1; try congruence.
-      destruct (eval_exprlist le th m opndlist) eqn: E2; try congruence.
+      destruct (eval_expr le m obj_ptr) eqn: E1; try congruence.
+      destruct (eval_exprlist le m opndlist) eqn: E2; try congruence.
       destruct (resolve_ref oe v) eqn: E3; try congruence.
       destruct m0; try congruence.
       destruct (in_dec ident_eq c (superinterfaces_id (genv_cenv ge) i)); try congruence.
@@ -1106,20 +1127,20 @@ Proof.
     + (* S_javatry *)
       inversion H; subst; eauto.
     + (* s_throw *)
-      destruct (eval_expr le th m opnd) eqn: E1; try congruence.
+      destruct (eval_expr le m opnd) eqn: E1; try congruence.
       inversion H; subst; eauto.
     + (* S_javacatch *)
       congruence.
     + (* S_decref *)
       destruct (prim_type_of opnd) eqn: E1; try congruence.
-      destruct (eval_expr le th m opnd) eqn: E2; try congruence.
+      destruct (eval_expr le m opnd) eqn: E2; try congruence.
       destruct v; try congruence.
       destruct (Ptrofs.eq_dec i (Ptrofs.repr 0)); try congruence.
       destruct (oe ! b) eqn: E3; try congruence.
       destruct p as [[mt n] b0].
       inversion H; subst; eauto.
     + (* S_free *)
-      destruct (eval_expr le th m opnd) eqn: E1; try congruence.
+      destruct (eval_expr le m opnd) eqn: E1; try congruence.
       destruct v; try congruence.
       * destruct (negb Archi.ptr64) eqn: E2; simpl in *; try congruence.
         destruct (Int.eq_dec i Int.zero); simpl in *; try congruence.
@@ -1136,14 +1157,14 @@ Proof.
         inversion H; subst; eauto.
     + (* S_incref *)
       destruct (prim_type_of opnd) eqn: E1; try congruence.
-      destruct (eval_expr le th m opnd) eqn: E2; try congruence.
+      destruct (eval_expr le m opnd) eqn: E2; try congruence.
       destruct v; try congruence.
       destruct (Ptrofs.eq_dec i (Ptrofs.repr 0)); try congruence.
       destruct (oe ! b) eqn: E3; try congruence.
       destruct p as [[mt n] b0].
       inversion H; subst; eauto.
     + (* S_eval *)
-      destruct (eval_expr le th m opnd) eqn: E1; try congruence.
+      destruct (eval_expr le m opnd) eqn: E1; try congruence.
       inversion H; subst; eauto.
   - (* CallState *)
     destruct f. destruct o; try congruence.
@@ -1155,9 +1176,9 @@ Proof.
     destruct (assign_returns ge l0 l res m) eqn: E1; try congruence.
     inversion H; subst; eauto.
   - (* ExceptionState *)
-    destruct th.
-    destruct (catch_cont k) eqn: E1; try congruence.
-    destruct (find_handler ge (resolve_type oe v p) l (fun_statement (snd f)) (call_cont c)) eqn: E2; try congruence.
+    destruct (find_thrownval le) eqn: E1; try congruence. destruct p.
+    destruct (catch_cont k) eqn: E2; try congruence.
+    destruct (find_handler ge (resolve_type oe v p) l (fun_statement (snd f)) (call_cont c)) eqn: E3; try congruence.
     + (* case 1 *)
       inversion H; subst; eauto.
     + (* case 2 *)
@@ -1189,8 +1210,12 @@ Proof.
     erewrite H0; eauto.
   - (* S_switch *)
     erewrite eval_expr_complete, H1; eauto.
-  - (* S_return *)
-    erewrite eval_exprlist_complete, H1, H2, H3; eauto.
+  - (* S_return nil *)
+    erewrite eval_exprlist_complete; eauto; simpl.
+    destruct H1; rewrite H1, H2; eauto.
+  - (* S_return cons *)
+    erewrite eval_exprlist_complete; eauto; simpl.
+    destruct vl; try congruence. rewrite H2, H3, H4; eauto.
   - (* S_skip return *)
     destruct k; simpl in *; try congruence; rewrite H1, H2; auto.
   - (* S_callassigned *)
@@ -1207,11 +1232,11 @@ Proof.
     erewrite eval_expr_complete; eauto. simpl.
     erewrite eval_exprlist_complete, H2, H3, H4; eauto.
   - (* ExceptionState case 1 *)
-    erewrite H0, H1; eauto.
+    erewrite H0, H1, H2; eauto.
   - (* ExceptionState case 2 *)
-    erewrite H0, H1; eauto.
+    erewrite H0, H1, H2; eauto.
   - (* ExceptionState case 3 *)
-    erewrite H0, H1; eauto.
+    erewrite H0, H1, H2; eauto.
   - (* S_throw *)
     erewrite eval_expr_complete; eauto.
   - (* S_free *)
@@ -1231,7 +1256,7 @@ Proof.
   - (* CallState *)
     rewrite H1; auto.
   - (* ReturnState *)
-    rewrite H0; auto.
+    inversion H; subst. rewrite H0; auto.
 Qed.
 
 End Semantics.
