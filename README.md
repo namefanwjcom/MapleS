@@ -2,10 +2,10 @@
 The formal syntax and semantics of MapleLight, a core subset of MapleIR, based on Coq, CompCert and InteractionTrees.
 
 ### See:
-- [MapleIR](https://gitee.com/openarkcompiler-incubator/mapleall/blob/master/doc/maple_ir_spec.md): the intermediate language of the openark compiler
-- [Coq](https://coq.inria.fr/)
-- [CompCert](http://compcert.inria.fr/)
-- [InteractionTrees](https://github.com/DeepSpec/InteractionTrees)
+- [MapleIR](https://gitee.com/openarkcompiler-incubator/mapleall/blob/master/doc/maple_ir_spec.md): the intermediate language of the openark compiler.
+- [Coq](https://coq.inria.fr/): a formal proof management system.
+- [CompCert](http://compcert.inria.fr/): a formally verified compiler for the C programming language, written in Coq.
+- [InteractionTrees](https://github.com/DeepSpec/InteractionTrees): a library for representing recursive and impure programs in Coq.
 
 ## Overview
 All files in the [Maple](https://github.com/namefanwjcom/MapleS/tree/master/Maple) directory are written by me.
@@ -40,21 +40,23 @@ Maple
 ```
 
 ## Dependencies
-- os: Ubuntu 18.04 x64
-- coq: 8.11.1
-- ocaml: 4.10.0
-- External ocaml/coq libaries:
+- OS: Ubuntu 18.04 x64
+- Coq: 8.11.1
+- Ocaml: 4.10.0
+- External Ocaml/Coq libaries:
   * coq-itree: 3.2.0
   * menhir: 20200612
 
-See [here](https://coq.inria.fr/opam-using.html) to learn how to install coq, ocaml and the external libaries if you are not familiar with coq.
+See [here](https://coq.inria.fr/opam-using.html) to learn how to install Coq, Ocaml and the external libaries if you are not familiar with coq.
 
 ## Compilation && Running
-You can compile the project and run the generated interpreter on a `.mpl' file to test the semantics through the following instructions.
+You can compile the project and run the generated interpreter on a [.mpl] file to test the semantics through the following instructions.
 
-`make maple'
-`cd Maple'
-`./mapleinterp test/xxx.mpl'
+```
+make maple
+cd Maple
+./mapleinterp test/xxx.mpl
+```
 
 ## Contact
 If you have any question, please contact namefanwjcom@outlook.com.
