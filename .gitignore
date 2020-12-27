@@ -82,6 +82,6 @@
 .csdp.cache
 
 # Maple
-test/
-Extraction/
-Maple/backup
+/test/
+/Extraction/
+/Maple/backup
