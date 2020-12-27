@@ -331,9 +331,9 @@ maplesrc: $(FILES:.v=.vo)
 
 mapleextraction: Maple/extraction/STAMP
 
-Maple/extraction/STAMP: $(FILES:.v=.vo) Maple/extraction/extraction.v
+Maple/extraction/STAMP: $(FILES:.v=.vo) Maple/extraction/Extraction.v
 	rm -f Maple/extraction/*.ml Maple/extraction/*.mli
-	$(COQEXEC) Maple/extraction/extraction.v
+	$(COQEXEC) Maple/extraction/Extraction.v
 	touch Maple/extraction/STAMP
 
 maple.depend.extr: Maple/extraction/STAMP tools/modorder
