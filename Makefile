@@ -28,10 +28,10 @@ endif
 
 DIRS=lib common $(ARCHDIRS) backend cfrontend driver \
   flocq/Core flocq/Prop flocq/Calc flocq/IEEE754 \
-  exportclight MenhirLib cparser
+  exportclight MenhirLib cparser Maple/coq
 
 RECDIRS=lib common $(ARCHDIRS) backend cfrontend driver flocq exportclight \
-  MenhirLib cparser
+  MenhirLib cparser Maple
 
 COQINCLUDES=$(foreach d, $(RECDIRS), -R $(d) compcert.$(d))
 
@@ -110,8 +110,6 @@ CFRONTEND=Ctypes.v Cop.v Csyntax.v Csem.v Ctyping.v Cstrategy.v Cexec.v \
   Clight.v ClightBigstep.v SimplLocals.v SimplLocalsproof.v \
   Cshmgen.v Cshmgenproof.v \
   Csharpminor.v Cminorgen.v Cminorgenproof.v \
-  Maple.v Mapletypes.v MapleOp.v MapleExec.v MapleDenotation.v\
-  ITree.v
 
 # Parser
 
@@ -127,10 +125,15 @@ MENHIRLIB=Alphabet.v Automaton.v Grammar.v Interpreter_complete.v \
 
 DRIVER=Compopts.v Compiler.v Complements.v
 
+# Maple
+
+MAPLE=MapleAST.v MapleInter.v MapleLight.v MapleLightTypes.v \
+  MapleLightOp.v MapleLightExec.v MapleLightDenotation.v
+
 # All source files
 
 FILES=$(VLIB) $(COMMON) $(BACKEND) $(CFRONTEND) $(DRIVER) $(FLOCQ) \
-  $(MENHIRLIB) $(PARSER)
+  $(MENHIRLIB) $(PARSER) $(MAPLE)
 
 # Generated source files
 
@@ -295,6 +298,9 @@ clean:
 	$(MAKE) -f Makefile.extr clean
 	$(MAKE) -C runtime clean
 	$(MAKE) -C test clean
+	rm -f Maple/extraction/STAMP Maple/extraction/*.ml Maple/extraction/*.mli
+	$(MAKE) -f Makefile.maple clean
+	rm -f Maple/test/*.ast Maple/test/*.inter Maple/test/*.light
 
 distclean:
 	$(MAKE) clean
@@ -312,3 +318,26 @@ print-includes:
 -include .depend
 
 FORCE:
+
+# Maple
+
+maple:
+	@test -f .depend || $(MAKE) depend
+	$(MAKE) maplesrc
+	$(MAKE) mapleextraction
+	$(MAKE) mapleinterp
+
+maplesrc: $(FILES:.v=.vo)
+
+mapleextraction: Maple/extraction/STAMP
+
+Maple/extraction/STAMP: $(FILES:.v=.vo) Maple/extraction/extraction.v
+	rm -f Maple/extraction/*.ml Maple/extraction/*.mli
+	$(COQEXEC) Maple/extraction/extraction.v
+	touch Maple/extraction/STAMP
+
+maple.depend.extr: Maple/extraction/STAMP tools/modorder
+	$(MAKE) -f Makefile.maple depend
+
+mapleinterp: maple.depend.extr FORCE
+	$(MAKE) -f Makefile.maple mapleinterp

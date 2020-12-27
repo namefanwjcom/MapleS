@@ -9,8 +9,8 @@ Require Import Memory.
 Require Import Events.
 Require Import Globalenvs.
 Require Import Smallstep.
-Require Import MapleOp.
-Require Import Mapletypes.
+Require Import MapleLightOp.
+Require Import MapleLightTypes.
 
 (*Set Implicit Arguments.*)
 Local Open Scope error_monad_scope.
@@ -65,7 +65,9 @@ Definition bsize := N.
 Definition Boffset := N.
 *)
 Inductive constant :=
+  | C_int: int -> constant
   | C_long: int64 -> constant
+  | C_single: float32 -> constant
   | C_float: float -> constant
   (*| C_complex: complex -> constant*).
 
@@ -203,7 +205,7 @@ Inductive statement :=
   (*| S_syncenter (opnd: expr)*)
   (*| S_syncexit (opnd: expr)*).
 
-Inductive storage_class :=
+Inductive storage_class : Set :=
   | SC_default
   (*| SC_extern
   | SC_fstatic
@@ -221,16 +223,29 @@ Record function_prototype : Type := {
   fun_params: list (ident * type);
 }.
 
+Lemma list_ident_type_eq:
+  forall l1 l2: list (ident * type),
+    {l1 = l2} + {l1 <> l2}.
+Proof.
+  intros. decide equality. decide equality.
+  apply type_eq. apply ident_eq.
+Qed.
+
 Lemma function_prototype_eq:
   forall fp1 fp2: function_prototype,
     {fp1 = fp2} + {fp1 <> fp2}.
 Proof.
-  intros. destruct fp1, fp2. decide equality.
-Admitted.
+  intros. decide equality.
+  - apply list_ident_type_eq.
+  - decide equality. apply type_eq.
+  - repeat (decide equality).
+Qed.
+
+Opaque list_ident_type_eq function_prototype_eq.
 
 Record function_body : Type := {
   fun_vars: list (ident * var_def);
-  fun_types: list (ident * type);
+  (*fun_types: list (ident * type);*)
   fun_pregs: list (ident * prim_type);
   fun_statement: statement;
 }.
@@ -244,21 +259,13 @@ Definition type_of_function (f: function) : type :=
 
 Record program : Type := {
   prog_vars: list (ident * var_def);
-  prog_types: list (ident * type);
   prog_comps: list (ident * composite_definition);
   prog_funcs: list (ident * function);
   prog_main: ident;
 }.
 
-Definition myvar_def := (mytype * var_attr) % type.
-(*
-Inductive global_def :=
-  | G_var : myvar_def -> global_def
-  | G_func : func_def -> global_def.
-*)
 Record genv := mkgenv {
-  genv_vars: PTree.t (block * myvar_def);
-  genv_mytypes: PTree.t mytype;
+  genv_vars: PTree.t (block * var_def);
   genv_cenv: composite_env;
   genv_cenv_consistent: composite_env_consistent genv_cenv;
   genv_funcs: PTree.t block;
@@ -281,19 +288,16 @@ Definition add_globalvar (gem: genv * mem) (x: ident * var_def) : res (genv * me
   match (genv_vars ge) ! id with
   | Some _ => Error (MSG "multiple definitions of " :: CTX id:: nil)
   | None =>
-    do mt <- type_to_mytype (genv_mytypes ge) ty;
-      match complete_mytype ce mt with
-      | true =>
-        let (m', b) := Mem.alloc m 0 (sizeof ce mt ta) in
-        OK (mkgenv
-              (PTree.set id (b, (mt, va)) ge.(genv_vars))
-              (ge.(genv_mytypes))
-              (ge.(genv_cenv))
-              (ge.(genv_cenv_consistent))
-              (ge.(genv_funcs))
-              (ge.(genv_fundefs)), m')
-      | false => Error (MSG "the type of " :: CTX id :: MSG " is incomplete" :: nil)
-      end
+    match complete_type ce ty with
+    | true =>
+      let (m', b) := Mem.alloc m 0 (sizeof ce ty ta) in
+      OK ({| genv_vars := PTree.set id (b, (ty, va)) (genv_vars ge);
+             genv_cenv := genv_cenv ge;
+             genv_cenv_consistent := genv_cenv_consistent ge;
+             genv_funcs := genv_funcs ge;
+             genv_fundefs := genv_fundefs ge; |}, m')
+    | false => Error (MSG "the type of " :: CTX id :: MSG " is incomplete" :: nil)
+    end
   end.
 
 Definition add_globalvars (gem: genv * mem) : res (genv * mem) :=
@@ -317,27 +321,22 @@ Definition add_func (gem: genv * mem) (x: ident * function) : res (genv * mem) :
     Error (MSG "multiple definitions of " :: CTX id :: nil)
   | Some (b, (fp, None)) =>
     if function_prototype_eq fp (fst f) then
-      OK (mkgenv
-            (ge.(genv_vars))
-            (ge.(genv_mytypes))
-            (ge.(genv_cenv))
-            (ge.(genv_cenv_consistent))
-            (ge.(genv_funcs))
-            (PTree.set b f ge.(genv_fundefs)), m)
+      OK ({| genv_vars := genv_vars ge;
+             genv_cenv := genv_cenv ge;
+             genv_cenv_consistent := genv_cenv_consistent ge;
+             genv_funcs := genv_funcs ge;
+             genv_fundefs := PTree.set b f (genv_fundefs ge); |}, m)
     else Error (MSG "the definition of " :: CTX id :: MSG "conflicts with its prototype" :: nil)
   | None =>
-    do mt <- type_to_mytype (genv_mytypes ge) (type_of_function f);
-      match complete_mytype ce mt with
+      match complete_type ce (type_of_function f) with
       | false => Error ((MSG "the type of " :: CTX id :: MSG " is incomplete" :: nil))
       | true =>
         let (m', b) := Mem.alloc m 0 1 in
-        OK (mkgenv
-              (ge.(genv_vars))
-              (ge.(genv_mytypes))
-              (ge.(genv_cenv))
-              (ge.(genv_cenv_consistent))
-              (PTree.set id b ge.(genv_funcs))
-              (PTree.set b f ge.(genv_fundefs)), m')
+        OK ({| genv_vars := genv_vars ge;
+               genv_cenv := genv_cenv ge;
+               genv_cenv_consistent := genv_cenv_consistent ge;
+               genv_funcs := PTree.set id b (genv_funcs ge);
+               genv_fundefs := PTree.set b f (genv_fundefs ge); |}, m')
       end
   end.
 
@@ -390,23 +389,19 @@ Definition add_javainterface_attr (ge: genv) (x: ident * interface_attr) : res g
 Definition add_javainterface_attrs (ge: genv) : res genv :=
   mfold_left add_javainterface_attr (prog_javainterface_attrs p) ge.
 *)
-Definition init_genv (P: composite_env_consistent ce) (te: PTree.t mytype) : res genv :=
-  do te' <- check_complete ce te;
-  OK (mkgenv
-        (PTree.empty (block * myvar_def))
-        (te')
-        (ce)
-        (P)
-        (PTree.empty block)
-        (PTree.empty function)).
+Definition init_genv (P: composite_env_consistent ce) : res genv :=
+  OK {| genv_vars := PTree.empty (block * var_def);
+        genv_cenv := ce;
+        genv_cenv_consistent := P;
+        genv_funcs := PTree.empty block;
+        genv_fundefs := PTree.empty function; |}.
 
 End Add_globals.
 
 Program Definition build_genv_mem : res (genv * mem) :=
-  do te <- add_types (prog_types p);
-  match build_composite_env te (prog_comps p) with
+  match build_composite_env (prog_comps p) with
   | OK ce =>
-    do ge1 <- init_genv ce _ te;
+    do ge1 <- init_genv ce _;
     do (ge2, m2) <- add_globalvars ce (ge1, Mem.empty);
     do (ge3, m3) <- add_funcs ce (ge2, m2);
     OK (ge3, m3)
@@ -464,14 +459,9 @@ Inductive val : Type :=
   | Vptr : block -> ptrofs -> val.*)
 
 Record lenv := mklenv {
-  lenv_vars: PTree.t (block * myvar_def);
-  lenv_mytypes: PTree.t mytype;
+  lenv_vars: PTree.t (block * var_def);
   lenv_pregs: PTree.t (val * prim_type);
-  lenv_thrownval: option (val * prim_type);
 }.
-
-(* the object environment maps each unique object_id to its block number in the heap, the class it belongs to and the count it is referred to. *)
-Definition oenv := PTree.t (mytype * nat * bool).
 
 (** [deref_loc ty m b ofs v] computes the value of a datum
   of type [ty] residing in memory [m] at block [b], offset [ofs].
@@ -479,7 +469,7 @@ Definition oenv := PTree.t (mytype * nat * bool).
   memory load is performed.  If the type [ty] indicates an access by
   reference or by copy, the pointer [Vptr b ofs] is returned. *)
 
-Fixpoint deref_loc (mt: mytype) (m: mem) (b: block) (ofs: ptrofs) : option val :=
+Fixpoint deref_loc (mt: type) (m: mem) (b: block) (ofs: ptrofs) : option val :=
   match (access_mode mt) with
   | By_value chunk => Mem.loadv chunk m (Vptr b ofs)
   | By_reference => Some (Vptr b ofs)
@@ -509,7 +499,7 @@ Fixpoint deref_loc (mt: mytype) (m: mem) (b: block) (ofs: ptrofs) : option val :
       Mem.storebytes m b (Ptrofs.unsigned ofs) bytes = Some m' ->
       assign_loc ce mt ta m b ofs (Vptr b' ofs') m'.*)
 
-Definition assign_loc (ce: composite_env) (mt: mytype) (ta: type_attr) (m: mem) (b: block) (ofs: ptrofs) (v: val) : option mem :=
+Definition assign_loc (ce: composite_env) (mt: type) (ta: type_attr) (m: mem) (b: block) (ofs: ptrofs) (v: val) : option mem :=
   match access_mode mt with
   | By_value chunk => Mem.storev chunk m (Vptr b ofs) v
   | By_copy =>
@@ -552,7 +542,7 @@ Variable fb: function_body.
   and memory state.  [e2] and [m2] are the final local environment
   and memory state. *)
 
-Definition add_localvar (lem: lenv * mem) (x: ident * myvar_def) : res (lenv * mem) :=
+Definition add_localvar (lem: lenv * mem) (x: ident * var_def) : res (lenv * mem) :=
   let (le, m) := lem in
   let (id, vd) := x in
   let (mt, va) := vd in
@@ -560,14 +550,11 @@ Definition add_localvar (lem: lenv * mem) (x: ident * myvar_def) : res (lenv * m
   match (lenv_vars le) ! id with
   | Some _ => Error (MSG "multiple definitions of " :: CTX id:: nil)
   | None =>
-    match complete_mytype ce mt with
+    match complete_type ce mt with
     | true =>
       let (m', b) := Mem.alloc m 0 (sizeof ce mt ta) in
-      OK (mklenv
-            (PTree.set id (b, (mt, va)) (lenv_vars le))
-            (lenv_mytypes le)
-            (lenv_pregs le)
-            (lenv_thrownval le), m')
+      OK ({| lenv_vars := PTree.set id (b, (mt, va)) (lenv_vars le);
+             lenv_pregs := lenv_pregs le |}, m')
     | false => Error (MSG "the type of " :: CTX id :: MSG " is incomplete" :: nil)
     end
   end.
@@ -578,14 +565,14 @@ Fixpoint params_to_vars (l: list (ident * type)) : list (ident * var_def) :=
   | (id, ty) :: l' => (id, (ty, default_var_attr)) :: params_to_vars l'
   end.
 
-Fixpoint change_type_of_vars (te: PTree.t mytype) (l: list (ident * var_def)) : res (list (ident * myvar_def)) :=
+(*Fixpoint change_type_of_vars (te: PTree.t type) (l: list (ident * var_def)) : res (list (ident * var_def)) :=
   match l with
   | nil => OK nil
   | (id, (ty, va)) :: l' =>
     do mt <- type_to_mytype te ty;
       do ml' <- change_type_of_vars te l';
       OK ((id, (mt, va)) :: ml')
-  end.
+  end.*)
 
 (*Fixpoint change_type_of_params (te: PTree.t mytype) (l: list (ident * type)) : res (list (ident * mytype)) :=
   match l with
@@ -598,8 +585,7 @@ Fixpoint change_type_of_vars (te: PTree.t mytype) (l: list (ident * var_def)) : 
 
 Definition add_localvars (lem: lenv * mem) : res (lenv * mem) :=
   let (le, m) := lem in
-  do l <- change_type_of_vars (lenv_mytypes le) (params_to_vars (fun_params fp) ++ fun_vars fb);
-  mfold_left add_localvar l lem.
+  mfold_left add_localvar (params_to_vars (fun_params fp) ++ fun_vars fb) lem.
 
 (** Initialization of local variables that are parameters to a function.
   [bind_parameters e m1 params args m2] stores the values [args]
@@ -619,7 +605,7 @@ Definition add_localvars (lem: lenv * mem) : res (lenv * mem) :=
       bind_parameters le m1 params vl m2 ->
       bind_parameters le m ((id, mt) :: params) (v1 :: vl) m2.*)
 
-Fixpoint bind_parameters (le: lenv) (m: mem) (l: list (ident * type)) (vmtl: list (val * mytype)) : option mem :=
+Fixpoint bind_parameters (le: lenv) (m: mem) (l: list (ident * type)) (vmtl: list (val * type)) : option mem :=
   match l, vmtl with
   | nil, nil => Some m
   | (id, _) :: l', (v, mt') :: vmtl' =>
@@ -645,13 +631,11 @@ Definition add_preg (le: lenv) (x: ident * prim_type) : res (lenv) :=
   match (lenv_pregs le) ! id with
   | Some _ => Error (MSG "multiple definitions of " :: CTX id:: nil)
   | None =>
-      match complete_mytype ce (MTprim pt) with
+      match complete_type ce (Tprim pt) with
       | true =>
-        OK (mklenv
-              (lenv_vars le)
-              (lenv_mytypes le)
-              (PTree.set id (Vundef, pt) (lenv_pregs le))
-              (lenv_thrownval le))
+        OK {| lenv_vars := lenv_vars le;
+              lenv_pregs := PTree.set id (Vundef, pt) (lenv_pregs le);
+           |}
       | false => Error (MSG "the type of " :: CTX id :: MSG " is incomplete" :: nil)
       end
   end.
@@ -670,32 +654,22 @@ Definition blocks_of_env (e: lenv) : list (block * Z * Z) :=
 
 End Add_locals.
 
-Definition init_lenv (te: PTree.t mytype) : lenv :=
-  {| lenv_vars := PTree.empty (block * myvar_def);
-     lenv_mytypes := te;
+Definition init_lenv : lenv :=
+  {| lenv_vars := PTree.empty (block * var_def);
      lenv_pregs := PTree.empty (val * prim_type);
-     lenv_thrownval := None
   |}.
 
-Definition build_lenv_mem (f: concrete_function) (m: mem) (vmtl: list (val * mytype)) : option (lenv * mem) :=
+Definition build_lenv_mem (f: concrete_function) (m: mem) (vmtl: list (val * type)) : option (lenv * mem) :=
   let (fp, fb) := f in
-  match add_types (fun_types fb) with
-  | OK te =>
-    match check_complete ce te with
-    | OK te' =>
-      match add_localvars fp fb ((init_lenv te'), m) with
-      | OK (le1, m1) =>
-        match bind_parameters le1 m1 (fun_params fp) vmtl with
-        | Some m2 =>
-          match add_pregs fb le1 with
-          | OK le2 => Some (le2, m2)
-          | Error _ => None
-          end
-        | None => None
-        end
+  match add_localvars fp fb (init_lenv, m) with
+  | OK (le1, m1) =>
+    match bind_parameters le1 m1 (fun_params fp) vmtl with
+    | Some m2 =>
+      match add_pregs fb le1 with
+      | OK le2 => Some (le2, m2)
       | Error _ => None
       end
-    | Error _ => None
+    | None => None
     end
   | Error _ => None
   end.
@@ -741,13 +715,21 @@ Definition is_call_cont (k: cont) : bool :=
 
 Fixpoint catch_cont (k: cont) : cont :=
   match k with
-  | Kseq s k => call_cont k
-  | Kwhile e s k => call_cont k
-  (*| Kgoto _ k => call_cont k
-  | Kreturn k => call_cont k
-  | Kexception _ k => call_cont k*)
+  | Kseq s k => catch_cont k
+  | Kwhile e s k => catch_cont k
+  (*| Kgoto _ k => catch_cont k
+  | Kreturn k => catch_cont k
+  | Kexception _ k => catch_cont k*)
   | _ => k
   end.
+
+(* the object environment maps each unique object_id to its block number in the heap, the class it belongs to and the count it is referred to. *)
+Definition oenv := PTree.t (type * nat * bool).
+
+(* the sreg environment contains special registers such as %%thrownval, etc. *)
+Record senv: Type := {
+  senv_thrownval: option (val * prim_type);
+}.
 
 (** States *)
 
@@ -758,49 +740,48 @@ Inductive state: Type :=
       (k: cont)
       (le: lenv)
       (oe: oenv)
+      (se: senv)
       (m: mem) : state
   | CallState
       (f: function)
-      (args: list (val * mytype))
+      (args: list (val * type))
       (k: cont)
       (oe: oenv)
+      (se: senv)
       (m: mem) : state
   | ReturnState
-      (res: list (val * mytype))
+      (res: list (val * type))
       (k: cont)
       (oe: oenv)
+      (se: senv)
       (m: mem) : state
   | ExceptionState
       (f: concrete_function)
       (k: cont)
       (le: lenv)
       (oe: oenv)
+      (se: senv)
       (m: mem) : state.
 
-Definition empty_oenv := PTree.empty (mytype * nat * bool).
+Definition init_oenv : oenv := PTree.empty (type * nat * bool).
 
-Definition initial_state (p: program) (vmtl: list (val * mytype)) : res (genv * state) :=
-  do (ge, m) <- build_genv_mem p;
-    match (genv_funcs ge) ! (prog_main p) with
-    | Some b =>
-      match (genv_fundefs ge) ! b with
-      | Some f =>
-        OK (ge, CallState f vmtl Kstop empty_oenv m)
-      | _ =>
-        Error (MSG "cannot find the entry function " :: CTX (prog_main p) :: nil)
-      end
-    | None =>
-      Error (MSG "cannot load the entry function " :: CTX (prog_main p) :: nil)
-    end.
+Definition init_senv : senv :=
+  {| senv_thrownval := None |}.
+
+Inductive initial_state (p: program) (vmtl: list (val * type)) : genv -> state -> Prop :=
+  | initial_state_intro: forall ge m b f,
+      build_genv_mem p = OK (ge, m) ->
+      find_function_by_name ge (prog_main p) = Some (b, f) ->
+      initial_state p vmtl ge (CallState f vmtl Kstop init_oenv init_senv m).
 
 Section Semantics.
 
 Variable ge: genv.
 
-Fixpoint sem_cast_list (vl: list val) (mtl1 mtl2: mytypelist) (m: mem) : option (list (val * mytype)) :=
+Fixpoint sem_cast_list (vl: list val) (mtl1 mtl2: typelist) (m: mem) : option (list (val * type)) :=
   match vl, mtl1, mtl2 with
-  | nil, MTnil, MTnil => Some nil
-  | v :: vl', MTcons mt1  mtl1', MTcons mt2 mtl2' =>
+  | nil, Tnil, Tnil => Some nil
+  | v :: vl', Tcons mt1  mtl1', Tcons mt2 mtl2' =>
     match sem_cast v mt1 mt2 m (genv_cenv ge) with
     | Some v' =>
       match sem_cast_list vl' mtl1' mtl2' m with
@@ -835,13 +816,13 @@ Definition prim_type_of (e: expr) : prim_type :=
   | E_array b pt _ _ => pt
   end.
 
-Definition mytypeof (e: expr) : mytype :=
-  MTprim (prim_type_of e).
+Definition typeof (e: expr) : type :=
+  Tprim (prim_type_of e).
 
-Fixpoint mytypelistof (el: exprlist) : mytypelist :=
+Fixpoint typelistof (el: exprlist) : typelist :=
   match el with
-  | E_nil => MTnil
-  | E_cons e el' => MTcons (mytypeof e) (mytypelistof el')
+  | E_nil => Tnil
+  | E_cons e el' => Tcons (typeof e) (typelistof el')
   end.
 
 Definition prim_type_of_ext_expr (ee: ext_expr) : prim_type :=
@@ -853,8 +834,8 @@ Definition prim_type_of_ext_expr (ee: ext_expr) : prim_type :=
   | EE_gcpermalloc pt _ => pt
   end.
 
-Definition mytypeof_ext_expr (ee: ext_expr) : mytype :=
-  MTprim (prim_type_of_ext_expr ee).
+Definition typeof_ext_expr (ee: ext_expr) : type :=
+  Tprim (prim_type_of_ext_expr ee).
 
 Definition is_pointer_prim_type (pt: prim_type) : bool :=
   match pt with
@@ -876,13 +857,13 @@ Definition is_float_prim_type (pt: prim_type) : bool :=
   | _ => false
   end.
 
-Definition mytype_prim_type_compatible (mt: mytype) (pt: prim_type) : bool :=
+Definition type_prim_type_compatible (mt: type) (pt: prim_type) : bool :=
   match mt with
-  | MTprim pt' => prim_type_eq pt' pt
-  | MTpointer _ => is_pointer_prim_type pt
-  | MTarray _ _ => is_pointer_prim_type pt (* Not sure *)
-  | MTfunction _ _ => false
-  | MTcomposite id =>
+  | Tprim pt' => prim_type_eq pt' pt
+  | Tpointer _ => is_pointer_prim_type pt
+  | Tarray _ _ => is_pointer_prim_type pt (* Not sure *)
+  | Tfunction _ _ => false
+  | Tcomposite id =>
     match pt with
     | PTagg => true
     | _ => false
@@ -891,7 +872,10 @@ Definition mytype_prim_type_compatible (mt: mytype) (pt: prim_type) : bool :=
 
 Section Eval_ext_expr.
 
+Variable se: senv.
+
 Variable le: lenv.
+
 (*
 Variable java_throw_exception_sem : (expr * mem * oenv) -> (block * ptrofs * mem * oenv) -> Prop.
 
@@ -904,7 +888,7 @@ Inductive address :=
   | Exception_address: block -> ptrofs -> address.
 *)
 
-Definition find_var (vid: var_id) : option (block * myvar_def) :=
+Definition find_var (vid: var_id) : option (block * var_def) :=
   match vid with
   | V_local id => (lenv_vars le) ! id
   | V_global id => (genv_vars ge) ! id
@@ -914,7 +898,7 @@ Definition find_preg (id: ident) : option (val * prim_type) :=
   (lenv_pregs le) ! id.
 
 Definition find_thrownval : option (val * prim_type) :=
-  lenv_thrownval le.
+  senv_thrownval se.
 
 Definition find_reg (rid: reg_id) : option (val * prim_type) :=
   match rid with
@@ -926,44 +910,50 @@ Section Eval_expr.
 
 Variable m: mem.
 
-Inductive eval_array: bool -> mytype -> list val -> ptrofs -> Prop :=
-  (*| eval_Earray_one_dimension:
+Inductive eval_array: bool -> type -> list val -> ptrofs -> Prop :=
+  | eval_Earray_one_dimension:
       forall mt mt' len i z b,
-        mt = MTarray mt' len ->
+        mt = Tpointer (Tarray mt' len) ->
         (b = false \/ (b = true /\ Int.intval i < len)) ->
         Int.intval i * (sizeof (genv_cenv ge) mt' default_type_attr) = z ->
-        eval_array b mt (Vint i :: nil) (Ptrofs.repr z)*)
+        eval_array b mt (Vint i :: nil) (Ptrofs.repr z)
   | eval_Earray_multi_dimension:
       forall mt ofs mt' len i z vl b,
-        mt = MTarray mt' len ->
+        mt = Tpointer (Tarray mt' len) ->
         (b = false \/ (b = true /\ Int.intval i < len)) ->
         Int.intval i * (sizeof (genv_cenv ge) mt' default_type_attr) = z ->
         eval_array b mt' vl ofs ->
         eval_array b mt (Vint i :: vl) (Ptrofs.add ofs (Ptrofs.repr z)).
 
 Inductive eval_expr : expr -> val -> Prop :=
+  | eval_Econst_int:   forall i pt v',
+      sem_cast (Vint i) (Tprim (PTint I32 Unsigned)) (Tprim pt) m (genv_cenv ge) = Some v' ->
+      eval_expr (E_constval pt (C_int i)) v'
   | eval_Econst_long:   forall i pt v',
-      sem_cast (Vlong i) (MTprim (PTint I64 Unsigned)) (MTprim pt) m (genv_cenv ge) = Some v' ->
+      sem_cast (Vlong i) (Tprim (PTint I64 Unsigned)) (Tprim pt) m (genv_cenv ge) = Some v' ->
       eval_expr (E_constval pt (C_long i)) v'
+  | eval_Econst_single:   forall f pt v',
+      sem_cast (Vsingle f) (Tprim (PTfloat F32)) (Tprim pt) m (genv_cenv ge) = Some v' ->
+      eval_expr (E_constval pt (C_single f)) v'
   | eval_Econst_float:   forall f pt v',
-      sem_cast (Vfloat f) (MTprim (PTfloat F64)) (MTprim pt) m (genv_cenv ge) = Some v' ->
+      sem_cast (Vfloat f) (Tprim (PTfloat F64)) (Tprim pt) m (genv_cenv ge) = Some v' ->
       eval_expr (E_constval pt (C_float f)) v'
   | eval_Edread: forall vid b pt mt va fi ofs mt' v v',
       find_var vid = Some (b, (mt, va)) ->
       fieldoffset (genv_cenv ge) mt fi = OK (mt', ofs) ->
       deref_loc mt' m b (Ptrofs.repr ofs) = Some v ->
-      sem_cast v mt' (MTprim pt) m (genv_cenv ge) = Some v' ->
+      sem_cast v mt' (Tprim pt) m (genv_cenv ge) = Some v' ->
       eval_expr (E_dread pt vid fi) v'
-  | eval_Eiread: forall e b ofs pt ty mt fi delta mt' mt'' v,
+  | eval_Eiread: forall e b ofs pt t t' t'' fi delta v v',
       eval_expr e (Vptr b ofs) ->
-      type_to_mytype (genv_mytypes ge) ty = OK mt ->
-      mt = MTpointer mt' ->
-      fieldoffset (genv_cenv ge) mt' fi = OK (mt'', delta) ->
-      sem_cast (Vptr b (Ptrofs.add ofs (Ptrofs.repr delta))) mt'' (MTprim pt) m (genv_cenv ge) = Some v ->
-      eval_expr (E_iread pt ty fi e) v
+      t = Tpointer t' ->
+      fieldoffset (genv_cenv ge) t' fi = OK (t'', delta) ->
+      deref_loc t'' m b (Ptrofs.add ofs (Ptrofs.repr delta)) = Some v ->
+      sem_cast v t'' (Tprim pt) m (genv_cenv ge) = Some v' ->
+      eval_expr (E_iread pt t fi e) v'
   | eval_Eregread:  forall pt' pt rid v v',
       find_reg rid = Some (v, pt) ->
-      sem_cast v (MTprim pt) (MTprim pt') m (genv_cenv ge) = Some v' ->
+      sem_cast v (Tprim pt) (Tprim pt') m (genv_cenv ge) = Some v' ->
       eval_expr (E_regread pt' rid) v'
   | eval_Eaddrof: forall vid b pt mt va fi ofs mt',
       is_pointer_prim_type pt = true ->
@@ -971,31 +961,28 @@ Inductive eval_expr : expr -> val -> Prop :=
       fieldoffset (genv_cenv ge) mt fi = OK (mt', ofs) ->
       eval_expr (E_addrof pt vid fi)
                 (Vptr b (Ptrofs.repr ofs))
-  | eval_Eiaddrof: forall e b pt ty mt ofs delta fi mt' mt'',
+  | eval_Eiaddrof: forall e b pt t t' t'' ofs delta fi,
       is_pointer_prim_type pt = true ->
       eval_expr e (Vptr b ofs) ->
-      type_to_mytype (genv_mytypes ge) ty = OK mt ->
-      mt = MTpointer mt' ->
-      fieldoffset (genv_cenv ge) mt' fi = OK (mt'', delta) ->
-      eval_expr (E_iaddrof pt ty fi e)
+      t = Tpointer t' ->
+      fieldoffset (genv_cenv ge) t' fi = OK (t'', delta) ->
+      eval_expr (E_iaddrof pt t fi e)
                 (Vptr b (Ptrofs.add ofs (Ptrofs.repr delta)))
   | eval_Eaddroffunc: forall id b pt,
       (genv_funcs ge) ! id = Some b ->
       pt = (PTaddr A32) \/ pt = (PTaddr A64) ->
       eval_expr (E_addroffunc pt (Func id))
                 (Vptr b (Ptrofs.repr 0))
-  | eval_Esizeoftype: forall pt ty mt v',
-      type_to_mytype (genv_mytypes ge) ty = OK mt ->
-      sem_cast (Vptrofs (Ptrofs.repr (sizeof (genv_cenv ge) mt default_type_attr))) (MTprim (if Archi.ptr64 then (PTint I64 Unsigned) else (PTint I32 Unsigned))) (MTprim pt) m (genv_cenv ge) = Some v' ->
-      eval_expr (E_sizeoftype pt ty) v'
-  | eval_Eretype: forall pt ty mt v v' e,
+  | eval_Esizeoftype: forall pt t v',
+      sem_cast (Vptrofs (Ptrofs.repr (sizeof (genv_cenv ge) t default_type_attr))) (Tprim (if Archi.ptr64 then (PTint I64 Unsigned) else (PTint I32 Unsigned))) (Tprim pt) m (genv_cenv ge) = Some v' ->
+      eval_expr (E_sizeoftype pt t) v'
+  | eval_Eretype: forall pt t v v' e,
       eval_expr e v ->
-      type_to_mytype (genv_mytypes ge) ty = OK mt ->
-      sem_cast v mt (MTprim pt) m (genv_cenv ge) = Some v' ->
-      eval_expr (E_retype pt ty e) v'
+      sem_cast v t (Tprim pt) m (genv_cenv ge) = Some v' ->
+      eval_expr (E_retype pt t e) v'
   | eval_Ecvt: forall pt pt' v v' e,
       eval_expr e v ->
-      sem_cast v (MTprim pt) (MTprim pt') m (genv_cenv ge) = Some v' ->
+      sem_cast v (Tprim pt) (Tprim pt') m (genv_cenv ge) = Some v' ->
       eval_expr (E_cvt pt' pt e) v'
   | eval_Eceil: forall pt pt' v v' e,
       eval_expr e v ->
@@ -1009,62 +996,61 @@ Inductive eval_expr : expr -> val -> Prop :=
       eval_expr e v ->
       sem_trunc v pt pt' = Some v' ->
       eval_expr (E_trunc pt' pt e) v'
-  | eval_Eunary: forall e op pt v v',
+  | eval_Eunary: forall e uop pt v v',
       eval_expr e v ->
-      sem_unary_operation op v (mytypeof e) (MTprim pt) m (genv_cenv ge) = Some v' ->
-      eval_expr (E_unary op pt e) v'
-  | eval_Ebinary: forall e1 e2 v1 v2 op pt v,
+      sem_unary_operation uop v (typeof e) (Tprim pt) m (genv_cenv ge) = Some v' ->
+      eval_expr (E_unary uop pt e) v'
+  | eval_Ebinary: forall e1 e2 v1 v2 bop pt v,
       eval_expr e1 v1 ->
       eval_expr e2 v2 ->
-      sem_binary_operation op v1 (mytypeof e1) v2 (mytypeof e2) (MTprim pt) m (genv_cenv ge) = Some v ->
-      eval_expr (E_binary op pt e1 e2) v
+      sem_binary_operation bop v1 (typeof e1) v2 (typeof e2) (Tprim pt) m (genv_cenv ge) = Some v ->
+      eval_expr (E_binary bop pt e1 e2) v
   | eval_Ecand_true: forall e1 e2 v1 v2 b pt,
       is_int_prim_type pt = true ->
       eval_expr e1 v1 ->
-      bool_val v1 (mytypeof e1) m = Some true ->
+      bool_val v1 (typeof e1) m = Some true ->
       eval_expr e2 v2 ->
-      bool_val v2 (mytypeof e2) m = Some b ->
+      bool_val v2 (typeof e2) m = Some b ->
       eval_expr (E_cand pt e1 e2)
                 (Val.of_bool b)
   | eval_Ecand_false: forall e1 e2 v1 pt,
       is_int_prim_type pt = true ->
       eval_expr e1 v1 ->
-      bool_val v1 (mytypeof e1) m = Some false ->
+      bool_val v1 (typeof e1) m = Some false ->
       eval_expr (E_cand pt e1 e2)
                 (Val.of_bool false)
   | eval_Ecior_false: forall e1 e2 v1 v2 b pt,
       is_int_prim_type pt = true ->
       eval_expr e1 v1 ->
-      bool_val v1 (mytypeof e1) m = Some false ->
+      bool_val v1 (typeof e1) m = Some false ->
       eval_expr e2 v2 ->
-      bool_val v2 (mytypeof e2) m = Some b ->
+      bool_val v2 (typeof e2) m = Some b ->
       eval_expr (E_cior pt e1 e2)
                 (Val.of_bool b)
   | eval_Ecior_true: forall e1 e2 v1 pt,
       is_int_prim_type pt = true ->
       eval_expr e1 v1 ->
-      bool_val v1 (mytypeof e1) m = Some true ->
+      bool_val v1 (typeof e1) m = Some true ->
       eval_expr (E_cior pt e1 e2)
                 (Val.of_bool true)
   | eval_Eselect_left: forall e1 e2 e3 v1 v2 pt,
       (prim_type_of e2 = pt /\ prim_type_of e3 = pt) ->
       eval_expr e1 v1 ->
-      bool_val v1 (mytypeof e1) m = Some true ->
+      bool_val v1 (typeof e1) m = Some true ->
       eval_expr e2 v2 ->
       eval_expr (E_select pt e1 e2 e3) v2
   | eval_Eselect_right: forall e1 e2 e3 v1 v3 pt,
       (prim_type_of e2 = pt /\ prim_type_of e3 = pt) ->
       eval_expr e1 v1 ->
-      bool_val v1 (mytypeof e1) m = Some false ->
+      bool_val v1 (typeof e1) m = Some false ->
       eval_expr e3 v3  ->
       eval_expr (E_select pt e1 e2 e3) v3
-  | eval_Earray: forall pt ty mt e loc ofs el vl delta b,
+  | eval_Earray: forall pt t e loc ofs el vl delta b,
       is_pointer_prim_type pt = true ->
-      type_to_mytype (genv_mytypes ge) ty = OK mt ->
       eval_expr e (Vptr loc ofs) ->
       eval_exprlist el vl ->
-      eval_array b mt vl delta ->
-      eval_expr (E_array b pt ty (E_cons e el))
+      eval_array b t vl delta ->
+      eval_expr (E_array b pt t (E_cons e el))
                 (Vptr loc (Ptrofs.add ofs delta))
 with eval_exprlist: exprlist -> list val -> Prop :=
   | eval_Enil:
@@ -1102,46 +1088,42 @@ Inductive eval_ext_expr: (ext_expr * oenv * mem) -> (val * oenv * mem) -> Prop :
       is_pointer_prim_type pt = true ->
       eval_ext_expr (EE_malloc pt e, oe, m)
                     (Vptr b Ptrofs.zero, oe, m'')
-  | eval_gcmalloc: forall pt ty mt oe m m' b,
-      type_to_mytype (genv_mytypes ge) ty = OK mt ->
-      Mem.alloc m 0 (sizeof (genv_cenv ge) mt default_type_attr) = (m', b) ->
+  | eval_gcmalloc: forall pt t oe m m' b,
+      Mem.alloc m 0 (sizeof (genv_cenv ge) t default_type_attr) = (m', b) ->
       is_pointer_prim_type pt = true ->
-      eval_ext_expr (EE_gcmalloc pt ty, oe, m)
-                    (Vptr b Ptrofs.zero, PTree.set b (mt, O, true) oe, m')
-  | eval_gcmallocjarray_int: forall pt ty mt e oe m m' b v n z,
+      eval_ext_expr (EE_gcmalloc pt t, oe, m)
+                    (Vptr b Ptrofs.zero, PTree.set b (t, O, true) oe, m')
+  | eval_gcmallocjarray_int: forall pt t e oe m m' b v n z,
       eval_expr m e v ->
       (v = Vint n /\ Int.unsigned n = z) ->
-      type_to_mytype (genv_mytypes ge) ty = OK mt ->
-      Mem.alloc m 0 (Z.mul z (sizeof (genv_cenv ge) mt default_type_attr)) = (m', b) ->
+      Mem.alloc m 0 (Z.mul z (sizeof (genv_cenv ge) t default_type_attr)) = (m', b) ->
       is_pointer_prim_type pt = true ->
-      eval_ext_expr (EE_gcmallocjarray pt ty e, oe, m)
-                    (Vptr b Ptrofs.zero, PTree.set b (MTarray mt z, O, true) oe, m')
-  | eval_gcmallocjarray_long: forall pt ty mt e oe m m' b v n z,
+      eval_ext_expr (EE_gcmallocjarray pt t e, oe, m)
+                    (Vptr b Ptrofs.zero, PTree.set b (Tarray t z, O, true) oe, m')
+  | eval_gcmallocjarray_long: forall pt t e oe m m' b v n z,
       eval_expr m e v ->
       (v = Vlong n /\ Int64.unsigned n = z) ->
-      type_to_mytype (genv_mytypes ge) ty = OK mt ->
-      Mem.alloc m 0 (Z.mul z (sizeof (genv_cenv ge) mt default_type_attr)) = (m', b) ->
+      Mem.alloc m 0 (Z.mul z (sizeof (genv_cenv ge) t default_type_attr)) = (m', b) ->
       is_pointer_prim_type pt = true ->
-      eval_ext_expr (EE_gcmallocjarray pt ty e, oe, m)
-                    (Vptr b Ptrofs.zero, PTree.set b (MTarray mt z, O, true) oe, m')
-  | eval_gcpermalloc: forall pt ty mt oe m m' b,
-      type_to_mytype (genv_mytypes ge) ty = OK mt ->
-      Mem.alloc m 0 (sizeof (genv_cenv ge) mt default_type_attr) = (m', b) ->
+      eval_ext_expr (EE_gcmallocjarray pt t e, oe, m)
+                    (Vptr b Ptrofs.zero, PTree.set b (Tarray t z, O, true) oe, m')
+  | eval_gcpermalloc: forall pt t oe m m' b,
+      Mem.alloc m 0 (sizeof (genv_cenv ge) t default_type_attr) = (m', b) ->
       is_pointer_prim_type pt = true ->
-      eval_ext_expr (EE_gcpermalloc pt ty, oe, m)
-                    (Vptr b Ptrofs.zero, PTree.set b (mt, O, false) oe, m').
+      eval_ext_expr (EE_gcpermalloc pt t, oe, m)
+                    (Vptr b Ptrofs.zero, PTree.set b (t, O, false) oe, m').
 
-(*Inductive eval_expr_cast_normal : expr -> mytype -> mytype -> val -> Prop :=
+(*Inductive eval_expr_cast_normal : expr -> type -> type -> val -> Prop :=
   | eval_expr_nomal_cast: forall e mt1 mt2 v v',
       eval_expr_normal e v ->
       sem_cast v mt1 mt2 m = Some v' ->
       eval_expr_cast_normal e mt1 mt2 v'
-with eval_exprlist_cast_normal: exprlist -> mytypelist -> list val -> Prop :=
+with eval_exprlist_cast_normal: exprlist -> typelist -> list val -> Prop :=
   | eval_Enil_cast:
       eval_exprlist_cast_normal nil MTnil nil
   | eval_Econs_cast: forall e el v v' vl mt mtl,
       eval_expr_normal e v ->
-      sem_cast v mt (mytypeof e) m = Some v' ->
+      sem_cast v mt (typeof e) m = Some v' ->
       eval_exprlist_cast_normal el mtl vl  ->
       eval_exprlist_cast_normal (e :: el) (MTcons mt mtl) (v' :: vl).*)
 
@@ -1176,7 +1158,7 @@ Definition direct_superclass (id: ident) : option ident :=
   match (genv_cenv ge) ! id with
   | Some co =>
     match co_def co with
-    | MCDclass (Some pid) _ _ _ _ => Some pid
+    | CDclass (Some pid) _ _ _ _ => Some pid
     | _ => None
     end
   | None => None
@@ -1188,19 +1170,19 @@ Lemma direct_superclass_decrease_depth:
     (depthof_id (genv_cenv ge) id' < depthof_id (genv_cenv ge) id) % N.
 Proof.
   intros. unfold direct_superclass, depthof_id in *.
-  destruct (genv_cenv ge) ! id as [co | _] eqn: E;
-    destruct (genv_cenv ge) ! id' as [co' | _] eqn: E';
+  destruct (genv_cenv ge) ! id eqn: E;
+    destruct (genv_cenv ge) ! id' eqn: E';
     try congruence.
-  - destruct (genv_cenv_consistent ge id co) as [_ _ _ Hdepth].
+  - destruct (genv_cenv_consistent ge id c) as [_ _ _ Hdepth].
     auto. rewrite Hdepth. unfold depthof_composite.
-    destruct (co_def co); try congruence.
+    destruct (co_def c); try congruence.
     destruct o; try congruence. unfold depthof_id.
     destruct (genv_cenv ge) ! i eqn: E''; try congruence.
     inversion H; subst. rewrite E'' in E'.
     inversion E'; subst. xomega.
-  - destruct (genv_cenv_consistent ge id co) as [_ _ _ Hdepth].
+  - destruct (genv_cenv_consistent ge id c) as [_ _ _ Hdepth].
     auto. rewrite Hdepth. unfold depthof_composite.
-    destruct (co_def co); try congruence.
+    destruct (co_def c); try congruence.
     destruct o; try congruence. xomega.
 Qed.
 
@@ -1226,10 +1208,10 @@ Qed.*)
   | None => nil
   end.*)
 
-Fixpoint find_member_function (l: mymemberfuncs) (fid: ident) : option ident :=
+Fixpoint find_member_function (l: memberfuncs) (fid: ident) : option ident :=
   match l with
-  | MMFnil => None
-  | MMFcons id id' mt _ l' =>
+  | MFnil => None
+  | MFcons id id' mt _ l' =>
     if (ident_eq fid id) then Some id'
     else find_member_function l' fid
   end.
@@ -1238,7 +1220,7 @@ Program Fixpoint dispatch_function (cid: ident) (fid: ident) {measure (N.to_nat 
   match (genv_cenv ge) ! cid with
   | Some co =>
     match co_def co with
-    | MCDclass p _ _ l _ =>
+    | CDclass p _ _ l _ =>
       match p with
       | Some pid =>
         match find_member_function l fid with
@@ -1260,19 +1242,19 @@ Qed.
 
 Variable sub_prim_type : prim_type -> prim_type -> bool.
 
-Fixpoint sub_mytype (ce: composite_env) (mt1 mt2: mytype) : bool :=
+Fixpoint sub_type (ce: composite_env) (mt1 mt2: type) : bool :=
   match mt1, mt2 with
-  | MTprim pt1, MTprim pt2 => prim_type_eq pt1 pt2
-  | MTarray mt1' n1, MTarray mt2' n2 => Z.eq_dec n1 n2 && sub_mytype ce mt1' mt2'
-  | MTpointer mt1', MTpointer mt2' => sub_mytype ce mt1' mt2'
-  | MTcomposite id1, MTcomposite id2 =>
+  | Tprim pt1, Tprim pt2 => prim_type_eq pt1 pt2
+  | Tarray mt1' n1, Tarray mt2' n2 => Z.eq_dec n1 n2 && sub_type ce mt1' mt2'
+  | Tpointer mt1', Tpointer mt2' => sub_type ce mt1' mt2'
+  | Tcomposite id1, Tcomposite id2 =>
     ident_eq id1 id2
     || in_dec ident_eq id2 (superclasses_id ce id1)
     || in_dec ident_eq id2 (superinterfaces_id ce id1)
   | _, _ => false
   end.
 
-Fixpoint find_catch (mt: mytype) (lbl: label) (s: statement) (k: cont) : option cont :=
+Fixpoint find_catch (mt: type) (lbl: label) (s: statement) (k: cont) : option cont :=
   match s with
   | S_seq s1 s2 =>
     match find_catch mt lbl s1 (Kseq s2 k) with
@@ -1292,19 +1274,15 @@ Fixpoint find_catch (mt: mytype) (lbl: label) (s: statement) (k: cont) : option 
     find_catch mt lbl s' (Kjavatry ll k)
   | S_javacatch lbl' tyl =>
     if (ident_eq lbl lbl') then
-      match listtype_to_listmytype (genv_mytypes ge) tyl with
-      | OK mtl =>
-        match find (sub_mytype (genv_cenv ge) mt) mtl with
-        | Some mt' => Some k
-        | None => None
-        end
-      | Error _ => None
+      match find (sub_type (genv_cenv ge) mt) tyl with
+      | Some mt' => Some k
+      | None => None
       end
     else None
   | _ => None
   end.
 
-Fixpoint find_handler (mt: mytype) (ll: list label) (s: statement) (k: cont) : option cont :=
+Fixpoint find_handler (mt: type) (ll: list label) (s: statement) (k: cont) : option cont :=
   match ll with
   | nil => None
   | lbl :: ll' =>
@@ -1314,7 +1292,7 @@ Fixpoint find_handler (mt: mytype) (ll: list label) (s: statement) (k: cont) : o
     end
   end.
 
-Definition resolve_ref (oe: oenv) (v: val) : option mytype :=
+Definition resolve_ref (oe: oenv) (v: val) : option type :=
   match v with
   | Vptr loc ofs =>
     if zeq (Ptrofs.unsigned ofs) 0 then
@@ -1326,31 +1304,25 @@ Definition resolve_ref (oe: oenv) (v: val) : option mytype :=
   | _ => None
   end.
 
-Definition resolve_type (oe: oenv) (v: val) (pt: prim_type) : mytype :=
+Definition resolve_type (oe: oenv) (v: val) (pt: prim_type) : type :=
   match pt with
   | PTref =>
     match resolve_ref oe v with
-    | Some mt => (MTpointer mt)
-    | None => (MTprim pt)
+    | Some mt => (Tpointer mt)
+    | None => (Tprim pt)
     end
-  | _ => (MTprim pt)
+  | _ => (Tprim pt)
   end.
 
 Definition function_entry := build_lenv_mem (genv_cenv ge).
 
 Definition set_preg (le: lenv) (id: ident) (v: val) (pt: prim_type) : lenv :=
   {| lenv_vars := lenv_vars le;
-     lenv_mytypes := lenv_mytypes le;
      lenv_pregs := PTree.set id (v, pt) (lenv_pregs le);
-     lenv_thrownval := lenv_thrownval le;
   |}.
 
-Definition set_thrownval (le: lenv) (v: val) (pt: prim_type) : lenv :=
-  {| lenv_vars := lenv_vars le;
-     lenv_mytypes := lenv_mytypes le;
-     lenv_pregs := lenv_pregs le;
-     lenv_thrownval := Some (v, pt);
-  |}.
+Definition set_thrownval (se: senv) (v: val) (pt: prim_type) : senv :=
+  {| senv_thrownval := Some (v, pt); |}.
 
 Fixpoint select_switch (n: Z) (dl: label) (ll: list (Z * label)): label :=
   match ll with
@@ -1358,7 +1330,7 @@ Fixpoint select_switch (n: Z) (dl: label) (ll: list (Z * label)): label :=
   | (z, l) :: ll' => if zeq z n then l else select_switch n dl ll'
   end.
 
-Definition dassign (le: lenv) (m: mem) (vid: var_id) (fi: field_id) (v: val) (mt0: mytype) : option mem :=
+Definition dassign (le: lenv) (m: mem) (vid: var_id) (fi: field_id) (v: val) (mt0: type) : option mem :=
   match find_var le vid with
   | Some (loc, (mt, (sc, ta))) =>
       match fieldoffset (genv_cenv ge) mt fi with
@@ -1372,12 +1344,12 @@ Definition dassign (le: lenv) (m: mem) (vid: var_id) (fi: field_id) (v: val) (mt
   | None => None
   end.
 
-Fixpoint assign_returns (le: lenv) (l: list (var_id * field_id)) (vmtl: list (val * mytype)) (m: mem) : option mem :=
+Fixpoint assign_returns (le: lenv) (m: mem) (l: list (var_id * field_id)) (vmtl: list (val * type)) : option mem :=
   match l, vmtl with
   | nil, nil => Some m
   | (vid, fi) :: l', (v, mt) :: vl' =>
     match dassign le m vid fi v mt with
-    | Some m' => assign_returns le l' vl' m'
+    | Some m' => assign_returns le m' l' vl'
     | None => None
     end
   | _, _ => None
@@ -1385,7 +1357,7 @@ Fixpoint assign_returns (le: lenv) (l: list (var_id * field_id)) (vmtl: list (va
 
 (** Return the list of blocks in the codomain of [e], with low and high bounds. *)
 
-Definition block_of_binding (id_b_vd: ident * (block * myvar_def)) :=
+Definition block_of_binding (id_b_vd: ident * (block * var_def)) :=
   match id_b_vd with (id, (b, (mt, (sc, ta)))) => (b, 0, sizeof (genv_cenv ge) mt ta) end.
 
 Definition blocks_of_lenv (le: lenv) : list (block * Z * Z) :=
@@ -1394,193 +1366,190 @@ Definition blocks_of_lenv (le: lenv) : list (block * Z * Z) :=
 (** Transition relation *)
 
 Inductive step: state -> trace -> state -> Prop :=
-  | step_dassign: forall f vid fi k e le m loc ofs mt mt' sc ta v v' m' oe m'' oe',
+  | step_dassign: forall f vid fi k e le m loc ofs mt mt' sc ta v v' m' oe m'' oe' se,
       find_var le vid = Some (loc, (mt, (sc, ta))) ->
       fieldoffset (genv_cenv ge) mt fi = OK (mt', ofs) ->
-      eval_ext_expr le (e, oe, m) (v, oe', m') ->
-      sem_cast v (mytypeof_ext_expr e) mt' m' (genv_cenv ge) = Some v' ->
+      eval_ext_expr se le (e, oe, m) (v, oe', m') ->
+      sem_cast v (typeof_ext_expr e) mt' m' (genv_cenv ge) = Some v' ->
       assign_loc (genv_cenv ge) mt' ta m' loc (Ptrofs.repr ofs) v' = Some m'' ->
-      step (NormalState f (S_dassign vid fi e) k le oe m)
-        E0 (NormalState f S_skip k le oe' m'')
-  | step_iassign: forall f ty k e1 e2 le m loc ofs delta v v' m' mt mt' mt'' fi oe oe' m'',
-      type_to_mytype (genv_mytypes ge) ty = OK mt ->
-      eval_expr le m e1 (Vptr loc ofs) ->
-      mt = MTpointer mt' ->
-      fieldoffset (genv_cenv ge) mt' fi = OK (mt'', delta) ->
-      eval_ext_expr le (e2, oe, m) (v, oe', m') ->
-      sem_cast v (mytypeof_ext_expr e2) mt'' m' (genv_cenv ge) = Some v' ->
-      assign_loc (genv_cenv ge) mt'' default_type_attr m' loc (Ptrofs.add ofs (Ptrofs.repr delta)) v' = Some m'' ->
-      step (NormalState f (S_iassign ty fi e1 e2) k le oe m)
-        E0 (NormalState f S_skip k le oe' m'')
-  | step_regassign_preg_exist: forall f id pt k e le m v0 v v' oe oe' m',
+      step (NormalState f (S_dassign vid fi e) k le oe se m)
+        E0 (NormalState f S_skip k le oe' se m'')
+  | step_iassign: forall f ty ty' ty'' k e1 e2 le m loc ofs delta v v' m' fi oe oe' m'' se,
+      eval_expr se le m e1 (Vptr loc ofs) ->
+      ty = Tpointer ty' ->
+      fieldoffset (genv_cenv ge) ty' fi = OK (ty'', delta) ->
+      eval_ext_expr se le (e2, oe, m) (v, oe', m') ->
+      sem_cast v (typeof_ext_expr e2) ty'' m' (genv_cenv ge) = Some v' ->
+      assign_loc (genv_cenv ge) ty'' default_type_attr m' loc (Ptrofs.add ofs (Ptrofs.repr delta)) v' = Some m'' ->
+      step (NormalState f (S_iassign ty fi e1 e2) k le oe se m)
+        E0 (NormalState f S_skip k le oe' se m'')
+  | step_regassign_preg_exist: forall f id pt k e le m v0 v v' oe oe' m' se,
       find_preg le id = Some (v0, pt) ->
-      eval_ext_expr le (e, oe, m) (v, oe', m') ->
-      sem_cast v (mytypeof_ext_expr e) (MTprim pt) m' (genv_cenv ge) = Some v' ->
-      step (NormalState f (S_regassign pt (Preg id) e) k le oe m)
-        E0 (NormalState f S_skip k (set_preg le id v' pt) oe' m')
-  | step_regassign_preg_fresh: forall f id pt k e le m v v' oe oe' m',
+      eval_ext_expr se le (e, oe, m) (v, oe', m') ->
+      sem_cast v (typeof_ext_expr e) (Tprim pt) m' (genv_cenv ge) = Some v' ->
+      step (NormalState f (S_regassign pt (Preg id) e) k le oe se m)
+        E0 (NormalState f S_skip k (set_preg le id v' pt) oe' se m')
+  | step_regassign_preg_fresh: forall f id pt k e le m v v' oe oe' m' se,
       find_preg le id = None ->
-      eval_ext_expr le (e, oe, m) (v, oe', m') ->
-      sem_cast v (mytypeof_ext_expr e) (MTprim pt) m' (genv_cenv ge) = Some v' ->
-      step (NormalState f (S_regassign pt (Preg id) e) k le oe m)
-        E0 (NormalState f S_skip k (set_preg le id v' pt) oe' m')
-  | step_regassign_thrownval: forall f pt k e le m v v' oe oe' m',
-      eval_ext_expr le (e, oe, m) (v, oe', m') ->
-      sem_cast v (mytypeof_ext_expr e) (MTprim pt) m' (genv_cenv ge) = Some v' ->
-      step (NormalState f (S_regassign pt Thrownval e) k le oe m)
-        E0 (NormalState f S_skip k (set_thrownval le v' pt) oe' m')
-  | step_seq: forall f s1 s2 k le oe m,
-      step (NormalState f (S_seq s1 s2) k le oe m)
-        E0 (NormalState f s1 (Kseq s2 k) le oe m)
-  | step_skip_seq: forall f s k le oe m,
-      step (NormalState f S_skip (Kseq s k) le oe m)
-        E0 (NormalState f s k le oe m)
-  | step_if: forall f e s1 s2 k le oe m v b,
-      eval_expr le m e v ->
-      bool_val v (mytypeof e) m = Some b ->
-      step (NormalState f (S_if e s1 s2) k le oe m)
-        E0 (NormalState f (if b then s1 else s2) k le oe m)
-  | step_while: forall f s k e le oe m,
-      step (NormalState f (S_while e s) k le oe m)
-        E0 (NormalState f (S_if e (S_seq s (S_while e s)) S_skip) k le oe m)
-  | step_skip_while:  forall f s k e le oe m,
-      step (NormalState f S_skip (Kwhile e s k) le oe m)
-        E0 (NormalState f (S_while e s) k le oe m)
-  | step_label: forall f lbl s k le oe m,
-      step (NormalState f (S_label lbl s) k le oe m)
-        E0 (NormalState f s k le oe m)
-  | step_goto: forall f lbl k le oe m s' k',
+      eval_ext_expr se le (e, oe, m) (v, oe', m') ->
+      sem_cast v (typeof_ext_expr e) (Tprim pt) m' (genv_cenv ge) = Some v' ->
+      step (NormalState f (S_regassign pt (Preg id) e) k le oe se m)
+        E0 (NormalState f S_skip k (set_preg le id v' pt) oe' se m')
+  | step_regassign_thrownval: forall f pt k e le m v v' oe oe' m' se,
+      eval_ext_expr se le (e, oe, m) (v, oe', m') ->
+      sem_cast v (typeof_ext_expr e) (Tprim pt) m' (genv_cenv ge) = Some v' ->
+      step (NormalState f (S_regassign pt Thrownval e) k le oe se m)
+        E0 (NormalState f S_skip k le oe' (set_thrownval se v' pt) m')
+  | step_seq: forall f s1 s2 k le oe m se,
+      step (NormalState f (S_seq s1 s2) k le oe se m)
+        E0 (NormalState f s1 (Kseq s2 k) le oe se m)
+  | step_skip_seq: forall f s k le oe m se,
+      step (NormalState f S_skip (Kseq s k) le oe se m)
+        E0 (NormalState f s k le oe se m)
+  | step_if: forall f e s1 s2 k le oe m v b se,
+      eval_expr se le m e v ->
+      bool_val v (typeof e) m = Some b ->
+      step (NormalState f (S_if e s1 s2) k le oe se m)
+        E0 (NormalState f (if b then s1 else s2) k le oe se m)
+  | step_while: forall f s k e le oe se m,
+      step (NormalState f (S_while e s) k le oe se m)
+        E0 (NormalState f (S_if e (S_seq s (S_while e s)) S_skip) k le oe se m)
+  | step_skip_while:  forall f s k e le oe se m,
+      step (NormalState f S_skip (Kwhile e s k) le oe se m)
+        E0 (NormalState f (S_while e s) k le oe se m)
+  | step_label: forall f lbl s k le oe se m,
+      step (NormalState f (S_label lbl s) k le oe se m)
+        E0 (NormalState f s k le oe se m)
+  | step_goto: forall f lbl k le oe m s' k' se,
       find_label lbl (fun_statement (snd f)) (call_cont k) = Some (s', k') ->
-      step (NormalState f (S_goto lbl) k le oe m)
-        E0 (NormalState f s' k' le oe m)
-  | step_switch: forall f dl ll k e le oe m v n,
-      eval_expr le m e v ->
-      sem_switch_arg v (mytypeof e) = Some n ->
-      step (NormalState f (S_switch e dl ll) k le oe m)
-        E0 (NormalState f (S_goto (select_switch n dl ll)) k le oe m)
-  | step_return_nil: forall f k el le oe m m',
-      eval_exprlist le m el nil ->
+      step (NormalState f (S_goto lbl) k le oe se m)
+        E0 (NormalState f s' k' le oe se m)
+  | step_switch: forall f dl ll k e le oe m v n se,
+      eval_expr se le m e v ->
+      sem_switch_arg v (typeof e) = Some n ->
+      step (NormalState f (S_switch e dl ll) k le oe se m)
+        E0 (NormalState f (S_goto (select_switch n dl ll)) k le oe se m)
+  | step_return_nil: forall f k el le oe m m' se,
+      eval_exprlist se le m el nil ->
       (type_of_returns (fun_returns (fst f)) = Tnil \/
        type_of_returns (fun_returns (fst f)) = Tcons (Tprim PTvoid) Tnil)->
       Mem.free_list m (blocks_of_lenv le) = Some m' ->
-      step (NormalState f (S_return el) k le oe m)
-        E0 (ReturnState nil (call_cont k) oe m')
-  | step_return_cons: forall f k el le oe m m' vl mtl' vl',
-      eval_exprlist le m el vl ->
+      step (NormalState f (S_return el) k le oe se m)
+        E0 (ReturnState nil (call_cont k) oe se m')
+  | step_return_cons: forall f k el le oe m m' vl vl' se,
+      eval_exprlist se le m el vl ->
       vl <> nil ->
-      typelist_to_mytypelist (genv_mytypes ge) (type_of_returns (fun_returns (fst f))) = OK mtl' ->
-      sem_cast_list vl (mytypelistof el) mtl' m = Some vl' ->
+      sem_cast_list vl (typelistof el) (type_of_returns (fun_returns (fst f))) m = Some vl' ->
       Mem.free_list m (blocks_of_lenv le) = Some m' ->
-      step (NormalState f (S_return el) k le oe m)
-        E0 (ReturnState vl' (call_cont k) oe m')
-  | step_skip_return: forall f k le oe m m',
+      step (NormalState f (S_return el) k le oe se m)
+        E0 (ReturnState vl' (call_cont k) oe se m')
+  | step_skip_return: forall f k le oe m m' se,
       is_call_cont k = true ->
-      type_of_returns (fun_returns (fst f)) = Tnil ->
+      (type_of_returns (fun_returns (fst f)) = Tnil \/
+       type_of_returns (fun_returns (fst f)) = Tcons (Tprim PTvoid) Tnil)->
       Mem.free_list m (blocks_of_lenv le) = Some m' ->
-      step (NormalState f S_skip k le oe m)
-        E0 (ReturnState nil k oe m')
-  | step_callassigned: forall f fid k el le oe m vl l loc f' mtl' vl',
-      eval_exprlist le m el vl ->
+      step (NormalState f S_skip k le oe se m)
+        E0 (ReturnState nil k oe se m')
+  | step_callassigned: forall f fid k el le oe m vl l loc f' vl' se,
+      eval_exprlist se le m el vl ->
       find_function_by_name ge fid = Some (loc, f') ->
-      typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params (fst f'))) = OK mtl' ->
-      sem_cast_list vl (mytypelistof el) mtl' m = Some vl' ->
-      step (NormalState f (S_callassigned (Func fid) el l) k le oe m)
-        E0 (CallState f' vl' (Kcall l f le k) oe m)
-  | step_virtualcallassigned: forall cid f fid k el le oe m vl l loc f' mtl' vl' e v cid' fid',
-      eval_expr le m e v ->
-      eval_exprlist le m el vl ->
-      resolve_ref oe v = Some (MTcomposite cid') ->
-      In cid (superclasses_id (genv_cenv ge) cid') ->
+      sem_cast_list vl (typelistof el) (type_of_params (fun_params (fst f'))) m = Some vl' ->
+      step (NormalState f (S_callassigned (Func fid) el l) k le oe se m)
+        E0 (CallState f' vl' (Kcall l f le k) oe se m)
+  | step_virtualcallassigned: forall cid f fid k el le oe m vl l loc f' vl' e v cid' fid' se,
+      eval_expr se le m e v ->
+      eval_exprlist se le m el vl ->
+      resolve_ref oe v = Some (Tcomposite cid') ->
+      (cid = cid' \/ In cid (superclasses_id (genv_cenv ge) cid')) ->
       dispatch_function cid' fid = Some fid' ->
       find_function_by_name ge fid' = Some (loc, f') ->
-      typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params (fst f'))) = OK mtl' ->
-      sem_cast_list (v :: vl) (mytypelistof (E_cons e el)) mtl' m = Some vl' ->
-      step (NormalState f (S_virtualcallassigned cid fid e el l) k le oe m)
-        E0 (CallState f' vl' (Kcall l f le k) oe m)
-  | step_interfaceclasscallassigned: forall cid f fid k el le oe m vl l loc f' mtl' vl' e v cid' fid',
-      eval_expr le m e v ->
-      eval_exprlist le m el vl ->
-      resolve_ref oe v = Some (MTcomposite cid') ->
+      sem_cast_list (v :: vl) (typelistof (E_cons e el)) (type_of_params (fun_params (fst f'))) m = Some vl' ->
+      step (NormalState f (S_virtualcallassigned cid fid e el l) k le oe se m)
+        E0 (CallState f' vl' (Kcall l f le k) oe se m)
+  | step_interfaceclasscallassigned: forall cid f fid k el le oe m vl l loc f' vl' e v cid' fid' se,
+      eval_expr se le m e v ->
+      eval_exprlist se le m el vl ->
+      resolve_ref oe v = Some (Tcomposite cid') ->
       In cid (superinterfaces_id (genv_cenv ge) cid') ->
       dispatch_function cid' fid = Some fid' ->
       find_function_by_name ge fid' = Some (loc, f') ->
-      typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params (fst f'))) = OK mtl' ->
-      sem_cast_list (v :: vl) (mytypelistof (E_cons e el)) mtl' m = Some vl' ->
-      step (NormalState f (S_interfacecallassigned cid fid e el l) k le oe m)
-        E0 (CallState f' vl' (Kcall l f le k) oe m)
-  | step_icallassigned: forall f k e el le oe m vl l loc f' mtl' vl',
-      eval_expr le m e (Vptr loc Ptrofs.zero) ->
-      eval_exprlist le m el vl ->
+      sem_cast_list (v :: vl) (typelistof (E_cons e el)) (type_of_params (fun_params (fst f'))) m = Some vl' ->
+      step (NormalState f (S_interfacecallassigned cid fid e el l) k le oe se m)
+        E0 (CallState f' vl' (Kcall l f le k) oe se m)
+  | step_icallassigned: forall f k e el le oe m vl l loc f' vl' se,
+      eval_expr se le m e (Vptr loc Ptrofs.zero) ->
+      eval_exprlist se le m el vl ->
       find_function_by_address loc = Some f' ->
-      typelist_to_mytypelist (genv_mytypes ge) (type_of_params (fun_params (fst f'))) = OK mtl' ->
-      sem_cast_list vl (mytypelistof el) mtl' m = Some vl' ->
-      step (NormalState f (S_icallassigned e el l) k le oe m)
-        E0 (CallState f' vl' (Kcall l f le k) oe m)
-  | step_javatry: forall f ll s k le oe m,
-      step (NormalState f (S_javatry ll s) k le oe m)
-        E0 (NormalState f s (Kjavatry ll k) le oe m)
+      sem_cast_list vl (typelistof el) (type_of_params (fun_params (fst f'))) m = Some vl' ->
+      step (NormalState f (S_icallassigned e el l) k le oe se m)
+        E0 (CallState f' vl' (Kcall l f le k) oe se m)
+  | step_javatry: forall f ll s k le oe se m,
+      step (NormalState f (S_javatry ll s) k le oe se m)
+        E0 (NormalState f s (Kjavatry ll k) le oe se m)
+  | step_skip_javatry: forall f ll k le oe se m,
+      step (NormalState f S_skip (Kjavatry ll k) le oe se m)
+        E0 (NormalState f S_skip k le oe se m)
   (*| step_javacatch: forall f lbl tl s k le oe m,
       step (NormalState f (S_javacatch lbl tl) k le oe m)
         E0 (NormalState f S_skip k le oe m)*)
-  | step_javacatch1: forall f ll k k1 k3 le oe m v mt,
-      find_thrownval le = Some (v, mt) ->
+  | step_javacatch1: forall f ll k k1 k3 le oe m v mt se,
+      find_thrownval se = Some (v, mt) ->
       catch_cont k = Kjavatry ll k1 ->
       find_handler (resolve_type oe v mt) ll (fun_statement (snd f)) (call_cont k1) = Some k3 ->
-      step (ExceptionState f k le oe m)
-        E0 (NormalState f S_skip k3 le oe m)
-  | step_javacatch2: forall f ll k k1 le oe m v mt,
-      find_thrownval le = Some (v, mt) ->
+      step (ExceptionState f k le oe se m)
+        E0 (NormalState f S_skip k3 le oe se m)
+  | step_javacatch2: forall f ll k k1 le oe m v mt se,
+      find_thrownval se = Some (v, mt) ->
       catch_cont k = Kjavatry ll k1 ->
       find_handler (resolve_type oe v mt) ll (fun_statement (snd f)) (call_cont k1) = None ->
-      step (ExceptionState f k le oe m)
-        E0 (ExceptionState f k1 le oe m)
-  | step_javacatch3: forall f k k1 le oe m f' le' m' l v mt,
-      find_thrownval le = Some (v, mt) ->
+      step (ExceptionState f k le oe se m)
+        E0 (ExceptionState f k1 le oe se m)
+  | step_javacatch3: forall f k k1 le oe m f' le' m' l se,
       catch_cont k = Kcall l f' le' k1 ->
       Mem.free_list m (blocks_of_lenv le) = Some m' ->
-      step (ExceptionState f k le oe m)
-        E0 (ExceptionState f' k1 le' oe m')
-  | step_throw: forall f k le oe m e v,
-      eval_expr le m e v ->
-      step (NormalState f (S_throw e) k le oe m)
-        E0 (ExceptionState f k (set_thrownval le v (prim_type_of e)) oe m)
-  | step_free: forall f k le oe m e b lo v sz m',
-      eval_expr le m e (Vptr b lo) ->
+      step (ExceptionState f k le oe se m)
+        E0 (ExceptionState f' k1 le' oe se m')
+  | step_throw: forall f k le oe m e v se,
+      eval_expr se le m e v ->
+      step (NormalState f (S_throw e) k le oe se m)
+        E0 (ExceptionState f k le oe (set_thrownval se v (prim_type_of e)) m)
+  | step_free: forall f k le oe m e b lo v sz m' se,
+      eval_expr se le m e (Vptr b lo) ->
       Mem.load Mptr m b (Ptrofs.unsigned lo - size_chunk Mptr) = Some v ->
       val_to_ptrofs v = Some sz ->
       Ptrofs.unsigned sz > 0 ->
       Mem.free m b (Ptrofs.unsigned lo - size_chunk Mptr) (Ptrofs.unsigned lo + Ptrofs.unsigned sz) = Some m' ->
-      step (NormalState f (S_free e) k le oe m)
-        E0 (NormalState f S_skip k le oe m')
-  | step_free_null: forall f k le oe m e,
-      eval_expr le m e Vnullptr ->
-      step (NormalState f (S_free e) k le oe m)
-        E0 (NormalState f S_skip k le oe m)
-  | step_incref: forall f k le oe m e loc mt n b,
+      step (NormalState f (S_free e) k le oe se m)
+        E0 (NormalState f S_skip k le oe se m')
+  | step_free_null: forall f k le oe m e se,
+      eval_expr se le m e Vnullptr ->
+      step (NormalState f (S_free e) k le oe se m)
+        E0 (NormalState f S_skip k le oe se m)
+  | step_incref: forall f k le oe m e loc mt n b se,
       prim_type_of e = PTref ->
-      eval_expr le m e (Vptr loc (Ptrofs.repr 0)) ->
+      eval_expr se le m e (Vptr loc (Ptrofs.repr 0)) ->
       oe ! loc = Some (mt, n, b) ->
-      step (NormalState f (S_incref e) k le oe m)
-        E0 (NormalState f S_skip k le (PTree.set loc (mt, S n, b) oe) m)
-  | step_decref: forall f k le oe m e loc mt n b,
+      step (NormalState f (S_incref e) k le oe se m)
+        E0 (NormalState f S_skip k le (PTree.set loc (mt, S n, b) oe) se m)
+  | step_decref: forall f k le oe m e loc mt n b se,
       prim_type_of e = PTref ->
-      eval_expr le m e (Vptr loc (Ptrofs.repr 0)) ->
+      eval_expr se le m e (Vptr loc (Ptrofs.repr 0)) ->
       oe ! loc = Some (mt, n, b) ->
-      step (NormalState f (S_decref e) k le oe m)
-        E0 (NormalState f S_skip k le (PTree.set loc (mt, pred n, b) oe) m)
-  | step_eval: forall f k le oe m e v,
-      eval_expr le m e v ->
-      step (NormalState f (S_eval e) k le oe m)
-        E0 (NormalState f S_skip k le oe m)
-  | step_internal_function: forall f fp fb vl k m le oe m',
+      step (NormalState f (S_decref e) k le oe se m)
+        E0 (NormalState f S_skip k le (PTree.set loc (mt, pred n, b) oe) se m)
+  | step_eval: forall f k le oe m e v se,
+      eval_expr se le m e v ->
+      step (NormalState f (S_eval e) k le oe se m)
+        E0 (NormalState f S_skip k le oe se m)
+  | step_internal_function: forall f fp fb vl k m le oe se m',
       f = (fp, Some fb) ->
       function_entry (fp, fb) m vl = Some (le, m') ->
-      step (CallState f vl k oe m)
-        E0 (NormalState (fp, fb) (fun_statement fb) k le oe m')
-  | step_returnstate: forall f le oe k m m' l vl,
-      assign_returns le l vl m = Some m' ->
-      step (ReturnState vl (Kcall l f le k) oe m)
-        E0 (NormalState f S_skip k le oe m').
+      step (CallState f vl k oe se m)
+        E0 (NormalState (fp, fb) (fun_statement fb) k le oe se m')
+  | step_returnstate: forall f le oe k m m' l vl se,
+      assign_returns le m l vl = Some m' ->
+      step (ReturnState vl (Kcall l f le k) oe se m)
+        E0 (NormalState f S_skip k le oe se m').
 
 (** ** Whole-program semantics *)
 
@@ -1591,16 +1560,14 @@ Inductive step: state -> trace -> state -> Prop :=
 
 (** A final state is a [Returnstate] with an empty continuation. *)
 
-Definition final_state (s: state) : option (list (val * mytype)) :=
-  match s with
-  | ReturnState vmtl Kstop oe m => Some vmtl
-  | _ => None
-  end.
+Inductive final_state : state -> list (val * type) -> Prop :=
+  | final_state_intro: forall vmtl oe se m,
+      final_state (ReturnState vmtl Kstop oe se m) vmtl.
 
 End Semantics.
 
 (** The two semantics for function parameters.  First, parameters as local variables. *)
 
-(*Definition semantics1 (p: program) (vmtl: list (val * mytype)) :=
-  let (ge, st) := initial_state p in
-  Semantics_gen (step ge) st final_state ge ge.*)
+(*Definition MapleSmallstep (p: program) (args: list (val * type)) : res semantics :=
+  do (ge, m) <- build_genv_mem p;
+  OK (Semantics_gen step (initial_state p args ge) final_state ge ge).*)

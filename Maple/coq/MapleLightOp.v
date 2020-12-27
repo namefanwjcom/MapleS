@@ -21,7 +21,7 @@ Require Import Integers.
 Require Import Floats.
 Require Import Values.
 Require Import Memory.
-Require Import Mapletypes.
+Require Import MapleLightTypes.
 Require Archi.
 
 (** * Syntax of operators. *)
@@ -119,77 +119,77 @@ Inductive classify_cast_cases : Type :=
   | cast_case_agg
   | cast_case_default.
 
-Definition classify_cast (tfrom tto: mytype) : classify_cast_cases :=
+Definition classify_cast (tfrom tto: type) : classify_cast_cases :=
   match tto, tfrom with
   (* To [void] *)
-  | MTprim PTvoid, _ => cast_case_void
+  | Tprim PTvoid, _ => cast_case_void
   (* To [bool] *)
-  | MTprim PTbool, MTprim (PTint I64 _ | PTaddr A64) => cast_case_l2bool
-  | MTprim PTbool, MTprim (PTint _ _ | PTaddr A32) => cast_case_i2bool
-  | MTprim PTbool, MTprim (PTfloat F32) => cast_case_s2bool
-  | MTprim PTbool, MTprim (PTfloat F64) => cast_case_f2bool
-  | MTprim PTbool, (MTpointer _ | MTarray _ _ | MTprim PTptr | MTprim PTref) => 
+  | Tprim PTbool, Tprim (PTint I64 _ | PTaddr A64) => cast_case_l2bool
+  | Tprim PTbool, Tprim (PTint _ _ | PTaddr A32) => cast_case_i2bool
+  | Tprim PTbool, Tprim (PTfloat F32) => cast_case_s2bool
+  | Tprim PTbool, Tprim (PTfloat F64) => cast_case_f2bool
+  | Tprim PTbool, (Tpointer _ | Tarray _ _ | Tprim PTptr | Tprim PTref) => 
     if Archi.ptr64 then cast_case_l2bool else cast_case_i2bool
   (* To [long] *)
-  | MTprim (PTint I64 _), MTprim (PTint I64 _ | PTaddr A64) =>
+  | Tprim (PTint I64 _), Tprim (PTint I64 _ | PTaddr A64) =>
       if Archi.ptr64 then cast_case_pointer else cast_case_l2l
-  | MTprim (PTint I64 _), MTprim (PTint _ si1) => cast_case_i2l si1
-  | MTprim (PTint I64 _), MTprim (PTaddr A32) => cast_case_i2l Unsigned
-  | MTprim (PTint I64 si2), MTprim (PTfloat F64) => cast_case_f2l si2
-  | MTprim (PTint I64 si2), MTprim (PTfloat F32) => cast_case_s2l si2
-  | MTprim (PTint I64 si2), (MTpointer _ | MTarray _ _ | MTprim PTptr | MTprim PTref) =>
+  | Tprim (PTint I64 _), Tprim (PTint _ si1) => cast_case_i2l si1
+  | Tprim (PTint I64 _), Tprim (PTaddr A32) => cast_case_i2l Unsigned
+  | Tprim (PTint I64 si2), Tprim (PTfloat F64) => cast_case_f2l si2
+  | Tprim (PTint I64 si2), Tprim (PTfloat F32) => cast_case_s2l si2
+  | Tprim (PTint I64 si2), (Tpointer _ | Tarray _ _ | Tprim PTptr | Tprim PTref) =>
       if Archi.ptr64 then cast_case_pointer else cast_case_i2l si2
   (* To [int] *)
-  | MTprim (PTint sz2 si2), MTprim (PTint I64 _ | PTaddr A64) => cast_case_l2i sz2 si2
-  | MTprim (PTint sz2 si2), MTprim (PTint _ _ | PTaddr A32) =>
+  | Tprim (PTint sz2 si2), Tprim (PTint I64 _ | PTaddr A64) => cast_case_l2i sz2 si2
+  | Tprim (PTint sz2 si2), Tprim (PTint _ _ | PTaddr A32) =>
       if Archi.ptr64 then cast_case_i2i sz2 si2
       else if intsize_eq sz2 I32 then cast_case_pointer
       else cast_case_i2i sz2 si2
-  | MTprim (PTint sz2 si2), MTprim (PTfloat F64) => cast_case_f2i sz2 si2
-  | MTprim (PTint sz2 si2), MTprim (PTfloat F32) => cast_case_s2i sz2 si2
-  | MTprim (PTint sz2 si2), (MTpointer _ | MTarray _ _ | MTprim PTptr | MTprim PTref) =>
+  | Tprim (PTint sz2 si2), Tprim (PTfloat F64) => cast_case_f2i sz2 si2
+  | Tprim (PTint sz2 si2), Tprim (PTfloat F32) => cast_case_s2i sz2 si2
+  | Tprim (PTint sz2 si2), (Tpointer _ | Tarray _ _ | Tprim PTptr | Tprim PTref) =>
       if Archi.ptr64 then cast_case_l2i sz2 si2
       else if intsize_eq sz2 I32 then cast_case_pointer
       else cast_case_i2i sz2 si2
   (* To [float] *)
-  | MTprim (PTfloat F64), MTprim (PTint I64 si1) => cast_case_l2f si1
-  | MTprim (PTfloat F32), MTprim (PTint I64 si1) => cast_case_l2s si1
-  | MTprim (PTfloat F64), MTprim (PTint sz1 si1) => cast_case_i2f si1
-  | MTprim (PTfloat F32), MTprim (PTint sz1 si1) => cast_case_i2s si1
-  | MTprim (PTfloat F64), MTprim (PTfloat F64) => cast_case_f2f
-  | MTprim (PTfloat F32), MTprim (PTfloat F32) => cast_case_s2s
-  | MTprim (PTfloat F64), MTprim (PTfloat F32) => cast_case_s2f
-  | MTprim (PTfloat F32), MTprim (PTfloat F64) => cast_case_f2s
+  | Tprim (PTfloat F64), Tprim (PTint I64 si1) => cast_case_l2f si1
+  | Tprim (PTfloat F32), Tprim (PTint I64 si1) => cast_case_l2s si1
+  | Tprim (PTfloat F64), Tprim (PTint sz1 si1) => cast_case_i2f si1
+  | Tprim (PTfloat F32), Tprim (PTint sz1 si1) => cast_case_i2s si1
+  | Tprim (PTfloat F64), Tprim (PTfloat F64) => cast_case_f2f
+  | Tprim (PTfloat F32), Tprim (PTfloat F32) => cast_case_s2s
+  | Tprim (PTfloat F64), Tprim (PTfloat F32) => cast_case_s2f
+  | Tprim (PTfloat F32), Tprim (PTfloat F64) => cast_case_f2s
   (* To pointer types *)
-  | (MTpointer _ | MTprim PTptr | MTprim PTref), MTprim (PTint I64 _ | PTaddr A64) =>
+  | (Tpointer _ | Tprim PTptr | Tprim PTref), Tprim (PTint I64 _ | PTaddr A64) =>
       if Archi.ptr64 then cast_case_pointer else cast_case_l2i I32 Unsigned
-  | (MTpointer _ | MTprim PTptr | MTprim PTref), MTprim (PTint _ si) =>
+  | (Tpointer _ | Tprim PTptr | Tprim PTref), Tprim (PTint _ si) =>
     if Archi.ptr64 then cast_case_i2l si else cast_case_pointer
-  | (MTpointer _ | MTprim PTptr | MTprim PTref), MTprim (PTaddr A32) =>
+  | (Tpointer _ | Tprim PTptr | Tprim PTref), Tprim (PTaddr A32) =>
     if Archi.ptr64 then cast_case_i2l Unsigned else cast_case_pointer
-  | (MTpointer _ | MTprim PTptr | MTprim PTref), (MTpointer _ | MTarray _ _ | MTprim PTptr | MTprim PTref) => cast_case_pointer
+  | (Tpointer _ | Tprim PTptr | Tprim PTref), (Tpointer _ | Tarray _ _ | Tprim PTptr | Tprim PTref) => cast_case_pointer
   (* To [addr] *)
-  | MTprim (PTaddr A64), MTprim (PTint I64 _ | PTaddr A64) =>
+  | Tprim (PTaddr A64), Tprim (PTint I64 _ | PTaddr A64) =>
       if Archi.ptr64 then cast_case_pointer else cast_case_l2l
-  | MTprim (PTaddr A64), MTprim (PTint _ si1) => cast_case_i2l si1
-  | MTprim (PTaddr A64), MTprim (PTaddr A32) => cast_case_i2l Unsigned
-  | MTprim (PTaddr A64), MTprim (PTfloat F64) => cast_case_f2l Unsigned
-  | MTprim (PTaddr A64), MTprim (PTfloat F32) => cast_case_s2l Unsigned
-  | MTprim (PTaddr A64), (MTpointer _ | MTarray _ _ | MTprim PTptr | MTprim PTref) =>
+  | Tprim (PTaddr A64), Tprim (PTint _ si1) => cast_case_i2l si1
+  | Tprim (PTaddr A64), Tprim (PTaddr A32) => cast_case_i2l Unsigned
+  | Tprim (PTaddr A64), Tprim (PTfloat F64) => cast_case_f2l Unsigned
+  | Tprim (PTaddr A64), Tprim (PTfloat F32) => cast_case_s2l Unsigned
+  | Tprim (PTaddr A64), (Tpointer _ | Tarray _ _ | Tprim PTptr | Tprim PTref) =>
       if Archi.ptr64 then cast_case_pointer else cast_case_i2l Unsigned
-  | MTprim (PTaddr A32), MTprim (PTint I64 _ | PTaddr A64) => cast_case_l2i I32 Unsigned
-  | MTprim (PTaddr A32), MTprim (PTint _ _ | PTaddr A32) =>
+  | Tprim (PTaddr A32), Tprim (PTint I64 _ | PTaddr A64) => cast_case_l2i I32 Unsigned
+  | Tprim (PTaddr A32), Tprim (PTint _ _ | PTaddr A32) =>
       if Archi.ptr64 then cast_case_i2i I32 Unsigned
       else cast_case_pointer
-  | MTprim (PTaddr A32), MTprim (PTfloat F64) => cast_case_f2i I32 Unsigned
-  | MTprim (PTaddr A32), MTprim (PTfloat F32) => cast_case_s2i I32 Unsigned
-  | MTprim (PTaddr A32), (MTpointer _ | MTarray _ _ | MTprim PTptr | MTprim PTref) =>
+  | Tprim (PTaddr A32), Tprim (PTfloat F64) => cast_case_f2i I32 Unsigned
+  | Tprim (PTaddr A32), Tprim (PTfloat F32) => cast_case_s2i I32 Unsigned
+  | Tprim (PTaddr A32), (Tpointer _ | Tarray _ _ | Tprim PTptr | Tprim PTref) =>
       if Archi.ptr64 then cast_case_l2i I32 Unsigned
       else cast_case_pointer
   (* To agg *)
-  | MTprim PTagg, MTcomposite _ => cast_case_agg
+  | Tprim PTagg, Tcomposite _ => cast_case_agg
   (* To composite types *)
-  | MTcomposite id1, MTcomposite id2 => cast_case_composite id1 id2
+  | Tcomposite id1, Tcomposite id2 => cast_case_composite id1 id2
   (* Catch-all *)
   | _, _ => cast_case_default
   end.
@@ -261,7 +261,7 @@ Definition cast_single_long (si : signedness) (f: float32) : option int64 :=
   | Unsigned => Float32.to_longu f
   end.
 
-Definition sem_cast (v: val) (t1 t2: mytype) (m: mem) (ce: composite_env) : option val :=
+Definition sem_cast (v: val) (t1 t2: type) (m: mem) (ce: composite_env) : option val :=
   match classify_cast t1 t2 with
   | cast_case_pointer =>
       match v with
@@ -422,15 +422,15 @@ Inductive classify_bool_cases : Type :=
   | bool_case_s                           (**r single float *)
   | bool_default.
 
-Definition classify_bool (mt: mytype) : classify_bool_cases :=
-  match mytypeconv mt with
-  | MTprim (PTint (I8 | I16 | I32) _) => bool_case_i
-  | MTprim (PTint I64 _) => bool_case_l
-  | MTprim (PTaddr A32) => bool_case_i
-  | MTprim (PTaddr A64) => bool_case_l
-  | MTprim (PTptr | PTref) | MTpointer _ => if Archi.ptr64 then bool_case_l else bool_case_i
-  | MTprim (PTfloat F64) => bool_case_f
-  | MTprim (PTfloat F32) => bool_case_s
+Definition classify_bool (mt: type) : classify_bool_cases :=
+  match typeconv mt with
+  | Tprim (PTint (I8 | I16 | I32) _) => bool_case_i
+  | Tprim (PTint I64 _) => bool_case_l
+  | Tprim (PTaddr A32) => bool_case_i
+  | Tprim (PTaddr A64) => bool_case_l
+  | Tprim (PTptr | PTref) | Tpointer _ => if Archi.ptr64 then bool_case_l else bool_case_i
+  | Tprim (PTfloat F64) => bool_case_f
+  | Tprim (PTfloat F32) => bool_case_s
   | _ => bool_default
   end.
 
@@ -439,7 +439,7 @@ Definition classify_bool (mt: mytype) : classify_bool_cases :=
   considered as true.  The integer zero (which also represents
   the null pointer) and the float 0.0 are false. *)
 
-Definition bool_val (v: val) (mt: mytype) (m: mem) : option bool :=
+Definition bool_val (v: val) (mt: type) (m: mem) : option bool :=
   match classify_bool mt with
   | bool_case_i =>
       match v with
@@ -474,7 +474,7 @@ Definition bool_val (v: val) (mt: mytype) (m: mem) : option bool :=
 
 (** *** Boolean negation *)
 
-Definition sem_lnot (v: val) (mt: mytype) (m: mem): option val :=
+Definition sem_lnot (v: val) (mt: type) (m: mem): option val :=
   option_map (fun b => Val.of_bool (negb b)) (bool_val v mt m).
 
 (** *** Opposite and absolute value *)
@@ -486,9 +486,9 @@ Inductive classify_neg_cases : Type :=
   | neg_case_l(s: signedness)              (**r long *)
   | neg_default.
 
-Definition classify_neg (mt: mytype) : classify_neg_cases :=
+Definition classify_neg (mt: type) : classify_neg_cases :=
   match mt with
-  | MTprim pt =>
+  | Tprim pt =>
     match pt with
     | PTint I32 Unsigned | PTbool => neg_case_i Unsigned
     | PTint I64 si => neg_case_l si
@@ -500,7 +500,7 @@ Definition classify_neg (mt: mytype) : classify_neg_cases :=
   | _ => neg_default
   end.
 
-Definition sem_neg (v: val) (mt: mytype) : option val :=
+Definition sem_neg (v: val) (mt: type) : option val :=
   match classify_neg mt with
   | neg_case_i sg =>
       match v with
@@ -525,7 +525,7 @@ Definition sem_neg (v: val) (mt: mytype) : option val :=
   | neg_default => None
   end.
 
-Definition sem_abs (v: val) (mt: mytype) : option val :=
+Definition sem_abs (v: val) (mt: type) : option val :=
   match classify_neg mt with
   | neg_case_i Unsigned =>
       match v with
@@ -567,9 +567,9 @@ Inductive classify_bnot_cases : Type :=
   | bnot_case_l(s: signedness)              (**r long *)
   | bnot_default.
 
-Definition classify_bnot (mt: mytype) : classify_bnot_cases :=
+Definition classify_bnot (mt: type) : classify_bnot_cases :=
   match mt with
-  | MTprim pt =>
+  | Tprim pt =>
     match pt with
     | PTint I32 Unsigned | PTbool => bnot_case_i Unsigned
     | PTint I64 si => bnot_case_l si
@@ -579,7 +579,7 @@ Definition classify_bnot (mt: mytype) : classify_bnot_cases :=
   | _ => bnot_default
   end.
 
-Definition sem_bnot (v: val) (mt: mytype): option val :=
+Definition sem_bnot (v: val) (mt: type): option val :=
   match classify_bnot mt with
   | bnot_case_i sg =>
       match v with
@@ -601,9 +601,9 @@ Inductive classify_recip_cases : Type :=
   | recip_case_s              (**r single *)
   | recip_default.
 
-Definition classify_recip (mt: mytype) : classify_recip_cases :=
+Definition classify_recip (mt: type) : classify_recip_cases :=
   match mt with
-  | MTprim pt =>
+  | Tprim pt =>
     match pt with
     | PTfloat F32 => recip_case_s
     | PTfloat F64 => recip_case_f
@@ -612,7 +612,7 @@ Definition classify_recip (mt: mytype) : classify_recip_cases :=
   | _ => recip_default
   end.
 
-Definition sem_recip (v: val) (mt: mytype) : option val :=
+Definition sem_recip (v: val) (mt: type) : option val :=
   match classify_recip mt with
   | recip_case_f =>
     match v with
@@ -638,9 +638,9 @@ Inductive classify_ext_cases : Type :=
   | sext_case_l
   | ext_default.
 
-Definition classify_ext (mt: mytype) : classify_ext_cases :=
+Definition classify_ext (mt: type) : classify_ext_cases :=
   match mt with
-  | MTprim pt =>
+  | Tprim pt =>
     match pt with
     | PTint I64 Unsigned => zext_case_l
     | PTint I64 Signed => sext_case_l
@@ -651,7 +651,7 @@ Definition classify_ext (mt: mytype) : classify_ext_cases :=
   | _ => ext_default
   end.
 
-Definition sem_zext (v: val) (sz: N) (mt: mytype): option val :=
+Definition sem_zext (v: val) (sz: N) (mt: type): option val :=
   match classify_ext mt with
   | zext_case_i =>
       match v with
@@ -666,7 +666,7 @@ Definition sem_zext (v: val) (sz: N) (mt: mytype): option val :=
   | _ => None
   end.
 
-Definition sem_sext (v: val) (sz: N) (mt: mytype): option val :=
+Definition sem_sext (v: val) (sz: N) (mt: type): option val :=
   match classify_ext mt with
   | sext_case_i =>
       match v with
@@ -683,7 +683,7 @@ Definition sem_sext (v: val) (sz: N) (mt: mytype): option val :=
 
 (** *** Sqrt *)
 
-Definition sem_sqrt (v: val) (mt: mytype) : option val :=
+Definition sem_sqrt (v: val) (mt: type) : option val :=
   match classify_recip mt with
   | recip_case_f =>
     match v with
@@ -716,9 +716,9 @@ Inductive binarith_cases: Type :=
   | bin_case_s                         (**r at single float type *)
   | bin_default.                       (**r error *)
 
-Definition classify_binarith (mt1: mytype) (mt2: mytype) : binarith_cases :=
+Definition classify_binarith (mt1: type) (mt2: type) : binarith_cases :=
   match mt1, mt2 with
-  | MTprim pt1, MTprim pt2 =>
+  | Tprim pt1, Tprim pt2 =>
     match pt1, pt2 with
     | PTint I64 Signed, PTint I64 Signed => bin_case_l Signed
     | PTint I64 _, PTint I64 _ => bin_case_l Unsigned
@@ -741,37 +741,37 @@ Definition classify_binarith (mt1: mytype) (mt2: mytype) : binarith_cases :=
 (** The static type of the result. Both arguments are converted to this type
     before the actual computation. *)
 
-Definition binarith_type (c: binarith_cases) : mytype :=
+Definition binarith_type (c: binarith_cases) : type :=
   match c with
-  | bin_case_i sg => MTprim (PTint I32 sg)
-  | bin_case_l sg => MTprim (PTint I64 sg)
-  | bin_case_f    => MTprim (PTfloat F64)
-  | bin_case_s    => MTprim (PTfloat F32)
-  | bin_default   => MTprim (PTvoid)
+  | bin_case_i sg => Tprim (PTint I32 sg)
+  | bin_case_l sg => Tprim (PTint I64 sg)
+  | bin_case_f    => Tprim (PTfloat F64)
+  | bin_case_s    => Tprim (PTfloat F32)
+  | bin_default   => Tprim (PTvoid)
   end.
 
 Lemma binarith_type_of_int_preserve:
   forall si,
-    binarith_type (classify_binarith (MTprim (PTint I32 si)) (MTprim (PTint I32 si))) = (MTprim (PTint I32 si)).
+    binarith_type (classify_binarith (Tprim (PTint I32 si)) (Tprim (PTint I32 si))) = (Tprim (PTint I32 si)).
 Proof.
   intros. destruct si; simpl; auto.
 Qed.
 
 Lemma binarith_type_of_long_preserve:
   forall si,
-    binarith_type (classify_binarith (MTprim (PTint I64 si)) (MTprim (PTint I64 si))) = (MTprim (PTint I64 si)).
+    binarith_type (classify_binarith (Tprim (PTint I64 si)) (Tprim (PTint I64 si))) = (Tprim (PTint I64 si)).
 Proof.
   intros. destruct si; simpl; auto.
 Qed.
 
 Lemma binarith_type_of_float_preserve:
-  binarith_type (classify_binarith (MTprim (PTfloat F64)) (MTprim (PTfloat F64))) = (MTprim (PTfloat F64)).
+  binarith_type (classify_binarith (Tprim (PTfloat F64)) (Tprim (PTfloat F64))) = (Tprim (PTfloat F64)).
 Proof.
   intros. simpl; auto.
 Qed.
 
 Lemma binarith_type_of_single_preserve:
-  binarith_type (classify_binarith (MTprim (PTfloat F32)) (MTprim (PTfloat F32))) = (MTprim (PTfloat F32)).
+  binarith_type (classify_binarith (Tprim (PTfloat F32)) (Tprim (PTfloat F32))) = (Tprim (PTfloat F32)).
 Proof.
   intros. simpl; auto.
 Qed.
@@ -781,7 +781,7 @@ Definition sem_binarith
     (sem_long: signedness -> int64 -> int64 -> option val)
     (sem_float: float -> float -> option val)
     (sem_single: float32 -> float32 -> option val)
-    (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m: mem) (ce: composite_env): option val :=
+    (v1: val) (mt1: type) (v2: val) (mt2: type) (m: mem) (ce: composite_env): option val :=
   let c := classify_binarith mt1 mt2 in
   let mt := binarith_type c in
   match sem_cast v1 mt1 mt m ce with
@@ -816,7 +816,7 @@ Definition sem_binarith
 
 (** *** Addition *)
 
-Definition sem_add (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m: mem) (ce: composite_env) : option val :=
+Definition sem_add (v1: val) (mt1: type) (v2: val) (mt2: type) (m: mem) (ce: composite_env) : option val :=
   sem_binarith
     (fun sg n1 n2 => Some(Vint(Int.add n1 n2)))
     (fun sg n1 n2 => Some(Vlong(Int64.add n1 n2)))
@@ -826,7 +826,7 @@ Definition sem_add (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m: mem) (ce:
 
 (** *** Subtraction *)
 
-Definition sem_sub (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m:mem) (ce: composite_env) : option val :=
+Definition sem_sub (v1: val) (mt1: type) (v2: val) (mt2: type) (m:mem) (ce: composite_env) : option val :=
   sem_binarith
     (fun sg n1 n2 => Some(Vint(Int.sub n1 n2)))
     (fun sg n1 n2 => Some(Vlong(Int64.sub n1 n2)))
@@ -836,7 +836,7 @@ Definition sem_sub (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m:mem) (ce: 
 
 (** *** Multiplication, division, modulus *)
 
-Definition sem_mul (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m:mem) (ce: composite_env) : option val :=
+Definition sem_mul (v1: val) (mt1: type) (v2: val) (mt2: type) (m:mem) (ce: composite_env) : option val :=
   sem_binarith
     (fun sg n1 n2 => Some(Vint(Int.mul n1 n2)))
     (fun sg n1 n2 => Some(Vlong(Int64.mul n1 n2)))
@@ -844,7 +844,7 @@ Definition sem_mul (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m:mem) (ce: 
     (fun n1 n2 => Some(Vsingle(Float32.mul n1 n2)))
     v1 mt1 v2 mt2 m ce.
 
-Definition sem_div (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m:mem) (ce: composite_env) : option val :=
+Definition sem_div (v1: val) (mt1: type) (v2: val) (mt2: type) (m:mem) (ce: composite_env) : option val :=
   sem_binarith
     (fun sg n1 n2 =>
       match sg with
@@ -870,7 +870,7 @@ Definition sem_div (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m:mem) (ce: 
     (fun n1 n2 => Some(Vsingle(Float32.div n1 n2)))
     v1 mt1 v2 mt2 m ce.
 
-Definition sem_rem (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m:mem) (ce: composite_env) : option val :=
+Definition sem_rem (v1: val) (mt1: type) (v2: val) (mt2: type) (m:mem) (ce: composite_env) : option val :=
   sem_binarith
     (fun sg n1 n2 =>
       match sg with
@@ -896,7 +896,7 @@ Definition sem_rem (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m:mem) (ce: 
     (fun n1 n2 => None)
     v1 mt1 v2 mt2 m ce.
 
-Definition sem_band (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m:mem) (ce: composite_env) : option val :=
+Definition sem_band (v1: val) (mt1: type) (v2: val) (mt2: type) (m:mem) (ce: composite_env) : option val :=
   sem_binarith
     (fun sg n1 n2 => Some(Vint(Int.and n1 n2)))
     (fun sg n1 n2 => Some(Vlong(Int64.and n1 n2)))
@@ -904,7 +904,7 @@ Definition sem_band (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m:mem) (ce:
     (fun n1 n2 => None)
     v1 mt1 v2 mt2 m ce.
 
-Definition sem_bior (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m:mem) (ce: composite_env) : option val :=
+Definition sem_bior (v1: val) (mt1: type) (v2: val) (mt2: type) (m:mem) (ce: composite_env) : option val :=
   sem_binarith
     (fun sg n1 n2 => Some(Vint(Int.or n1 n2)))
     (fun sg n1 n2 => Some(Vlong(Int64.or n1 n2)))
@@ -912,7 +912,7 @@ Definition sem_bior (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m:mem) (ce:
     (fun n1 n2 => None)
     v1 mt1 v2 mt2 m ce.
 
-Definition sem_bxor (v1:val) (mt1: mytype) (v2: val) (mt2: mytype) (m:mem) (ce: composite_env) : option val :=
+Definition sem_bxor (v1:val) (mt1: type) (v2: val) (mt2: type) (m:mem) (ce: composite_env) : option val :=
   sem_binarith
     (fun sg n1 n2 => Some(Vint(Int.xor n1 n2)))
     (fun sg n1 n2 => Some(Vlong(Int64.xor n1 n2)))
@@ -933,9 +933,9 @@ Inductive classify_shift_cases : Type:=
   | shift_case_li(s: signedness)         (**r long, int *)
   | shift_default.
 
-Definition classify_shift (mt1: mytype) (mt2: mytype) :=
-  match mytypeconv mt1, mytypeconv mt2 with
-  | MTprim pt1, MTprim pt2 =>
+Definition classify_shift (mt1: type) (mt2: type) :=
+  match typeconv mt1, typeconv mt2 with
+  | Tprim pt1, Tprim pt2 =>
     match pt1, pt2 with
     | PTint I64 s, PTint I64 _ => shift_case_ll s
     | PTint I64 s, PTint _ _ => shift_case_li s
@@ -951,7 +951,7 @@ Definition classify_shift (mt1: mytype) (mt2: mytype) :=
 Definition sem_shift
     (sem_int: signedness -> int -> int -> int)
     (sem_long: signedness -> int64 -> int64 -> int64)
-    (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) : option val :=
+    (v1: val) (mt1: type) (v2: val) (mt2: type) : option val :=
   match classify_shift mt1 mt2 with
   | shift_case_ii sg =>
       match v1, v2 with
@@ -984,19 +984,19 @@ Definition sem_shift
   | shift_default => None
   end.
 
-Definition sem_shl (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) : option val :=
+Definition sem_shl (v1: val) (mt1: type) (v2: val) (mt2: type) : option val :=
   sem_shift
     (fun sg n1 n2 => Int.shl n1 n2)
     (fun sg n1 n2 => Int64.shl n1 n2)
     v1 mt1 v2 mt2.
 
-Definition sem_ashr (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) : option val :=
+Definition sem_ashr (v1: val) (mt1: type) (v2: val) (mt2: type) : option val :=
   sem_shift
     (fun sg n1 n2 => Int.shr n1 n2)
     (fun sg n1 n2 => Int64.shr n1 n2)
     v1 mt1 v2 mt2.
 
-Definition sem_lshr (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) : option val :=
+Definition sem_lshr (v1: val) (mt1: type) (v2: val) (mt2: type) : option val :=
   sem_shift
     (fun sg n1 n2 => Int.shru n1 n2)
     (fun sg n1 n2 => Int64.shru n1 n2)
@@ -1012,14 +1012,14 @@ Inductive classify_cmp_cases : Type :=
   | cmp_case_lp                       (**r long, pointer *)
   | cmp_default.                      (**r numerical, numerical *)
 
-Definition classify_cmp (mt1: mytype) (mt2: mytype) :=
-  match mytypeconv mt1, mytypeconv mt2 with
-  | (MTpointer _ | MTprim (PTptr | PTref)), MTprim (PTint I64 _ | PTaddr A64) => cmp_case_pl
-  | MTprim (PTint I64 _ | PTaddr A64), (MTpointer _ | MTprim (PTptr | PTref)) => cmp_case_lp
-  | (MTpointer _ | MTprim (PTptr | PTref)), (MTpointer _ | MTprim (PTptr | PTref)) => cmp_case_pp
-  | (MTpointer _ | MTprim (PTptr | PTref)), MTprim (PTint _ si) => cmp_case_pi si
-  | (MTpointer _ | MTprim (PTptr | PTref)), MTprim (PTaddr A32) => cmp_case_pi Unsigned
-  | MTprim (PTint _ si), (MTpointer _ | MTprim (PTptr | PTref)) => cmp_case_ip si
+Definition classify_cmp (mt1: type) (mt2: type) :=
+  match typeconv mt1, typeconv mt2 with
+  | (Tpointer _ | Tprim (PTptr | PTref)), Tprim (PTint I64 _ | PTaddr A64) => cmp_case_pl
+  | Tprim (PTint I64 _ | PTaddr A64), (Tpointer _ | Tprim (PTptr | PTref)) => cmp_case_lp
+  | (Tpointer _ | Tprim (PTptr | PTref)), (Tpointer _ | Tprim (PTptr | PTref)) => cmp_case_pp
+  | (Tpointer _ | Tprim (PTptr | PTref)), Tprim (PTint _ si) => cmp_case_pi si
+  | (Tpointer _ | Tprim (PTptr | PTref)), Tprim (PTaddr A32) => cmp_case_pi Unsigned
+  | Tprim (PTint _ si), (Tpointer _ | Tprim (PTptr | PTref)) => cmp_case_ip si
   | _, _ => cmp_default
   end.
 
@@ -1035,7 +1035,7 @@ Definition ptrofs_of_int (si: signedness) (n: int) : ptrofs :=
   | Unsigned => Ptrofs.of_intu n
   end.
 
-Definition sem_cmp_bool (c:comparison) (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m: mem) (ce: composite_env): option val :=
+Definition sem_cmp_bool (c:comparison) (v1: val) (mt1: type) (v2: val) (mt2: type) (m: mem) (ce: composite_env): option val :=
   match classify_cmp mt1 mt2 with
   | cmp_case_pp =>
       cmp_ptr m c v1 v2
@@ -1111,7 +1111,7 @@ Definition val_of_comparison (c: Datatypes.comparison) :=
   | Lt => Vint Int.mone
   end.
 
-Definition sem_cmp (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m: mem) (ce: composite_env) : option val :=
+Definition sem_cmp (v1: val) (mt1: type) (v2: val) (mt2: type) (m: mem) (ce: composite_env) : option val :=
   sem_binarith
     (fun sg n1 n2 => Some (val_of_comparison (cmp_int sg n1 n2)))
     (fun sg n1 n2 => Some (val_of_comparison (cmp_long sg n1 n2)))
@@ -1131,7 +1131,7 @@ Definition cmpg_single (x y: float32) : Datatypes.comparison :=
   | None => Gt
   end.
 
-Definition sem_cmpg (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m: mem) (ce: composite_env) : option val :=
+Definition sem_cmpg (v1: val) (mt1: type) (v2: val) (mt2: type) (m: mem) (ce: composite_env) : option val :=
   sem_binarith
     (fun sg n1 n2 => Some (val_of_comparison (cmp_int sg n1 n2)))
     (fun sg n1 n2 => Some (val_of_comparison (cmp_long sg n1 n2)))
@@ -1151,7 +1151,7 @@ Definition cmpl_single (x y: float32) : Datatypes.comparison :=
   | None => Lt
   end.
 
-Definition sem_cmpl (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m: mem) (ce: composite_env) : option val :=
+Definition sem_cmpl (v1: val) (mt1: type) (v2: val) (mt2: type) (m: mem) (ce: composite_env) : option val :=
   sem_binarith
     (fun sg n1 n2 => Some (val_of_comparison (cmp_int sg n1 n2)))
     (fun sg n1 n2 => Some (val_of_comparison (cmp_long sg n1 n2)))
@@ -1159,7 +1159,7 @@ Definition sem_cmpl (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m: mem) (ce
     (fun n1 n2 => Some (val_of_comparison (cmpl_single n1 n2)))
     v1 mt1 v2 mt2 m ce.
 
-Definition sem_max (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m: mem) (ce: composite_env) : option val :=
+Definition sem_max (v1: val) (mt1: type) (v2: val) (mt2: type) (m: mem) (ce: composite_env) : option val :=
   sem_binarith
     (fun sg n1 n2 => Some (Vint (match cmp_int sg n1 n2 with Lt => n2 | _ => n1 end)))
     (fun sg n1 n2 => Some (Vlong (match cmp_long sg n1 n2 with Lt => n2 | _ => n1 end)))
@@ -1167,7 +1167,7 @@ Definition sem_max (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m: mem) (ce:
     (fun n1 n2 => match Float32.compare n1 n2 with Some Lt => Some (Vsingle n2) | Some _ => Some (Vsingle n1) | None => None end)
     v1 mt1 v2 mt2 m ce.
 
-Definition sem_min (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m: mem) (ce: composite_env) : option val :=
+Definition sem_min (v1: val) (mt1: type) (v2: val) (mt2: type) (m: mem) (ce: composite_env) : option val :=
   sem_binarith
     (fun sg n1 n2 => Some (Vint (match cmp_int sg n1 n2 with Gt => n2 | _ => n1 end)))
     (fun sg n1 n2 => Some (Vlong (match cmp_long sg n1 n2 with Gt => n2 | _ => n1 end)))
@@ -1187,7 +1187,7 @@ Definition land_long (x y: int64) := bool_long x && bool_long y.
 
 Definition lior_long (x y: int64) := bool_long x || bool_long y.
 
-Definition sem_land (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m: mem) (ce: composite_env) : option val :=
+Definition sem_land (v1: val) (mt1: type) (v2: val) (mt2: type) (m: mem) (ce: composite_env) : option val :=
   sem_binarith
     (fun sg n1 n2 => Some (Val.of_bool (land_int n1 n2)))
     (fun sg n1 n2 => Some (Val.of_bool (land_long n1 n2)))
@@ -1195,7 +1195,7 @@ Definition sem_land (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m: mem) (ce
     (fun n1 n2 => None)
     v1 mt1 v2 mt2 m ce.
 
-Definition sem_lior (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m: mem) (ce: composite_env) : option val :=
+Definition sem_lior (v1: val) (mt1: type) (v2: val) (mt2: type) (m: mem) (ce: composite_env) : option val :=
   sem_binarith
     (fun sg n1 n2 => Some (Val.of_bool (lior_int n1 n2)))
     (fun sg n1 n2 => Some (Val.of_bool (lior_long n1 n2)))
@@ -1203,13 +1203,13 @@ Definition sem_lior (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m: mem) (ce
     (fun n1 n2 => None)
     v1 mt1 v2 mt2 m ce.
 *)
-Definition sem_land (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m: mem) (ce: composite_env) : option val :=
+Definition sem_land (v1: val) (mt1: type) (v2: val) (mt2: type) (m: mem) (ce: composite_env) : option val :=
   match bool_val v1 mt1 m, bool_val v2 mt2 m with
   | Some b1, Some b2 => Some (Val.of_bool (b1 && b2))
   | _, _ => None
   end.
 
-Definition sem_lior (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (m: mem) (ce: composite_env) : option val :=
+Definition sem_lior (v1: val) (mt1: type) (v2: val) (mt2: type) (m: mem) (ce: composite_env) : option val :=
   match bool_val v1 mt1 m, bool_val v2 mt2 m with
   | Some b1, Some b2 => Some (Val.of_bool (b1 || b2))
   | _, _ => None
@@ -1222,9 +1222,9 @@ Inductive classify_switch_cases : Type :=
   | switch_case_l
   | switch_default.
 
-Definition classify_switch (mt: mytype) :=
+Definition classify_switch (mt: type) :=
   match mt with
-  | MTprim pt =>
+  | Tprim pt =>
     match pt with
     | PTint I64 _ => switch_case_l
     | PTint _ _ => switch_case_i
@@ -1233,7 +1233,7 @@ Definition classify_switch (mt: mytype) :=
   | _ => switch_default
   end.
 
-Definition sem_switch_arg (v: val) (mt: mytype): option Z :=
+Definition sem_switch_arg (v: val) (mt: type): option Z :=
   match classify_switch mt with
   | switch_case_i =>
       match v with Vint n => Some (Int.unsigned n) | _ => None end
@@ -1246,7 +1246,7 @@ Definition sem_switch_arg (v: val) (mt: mytype): option Z :=
 (** * Combined semantics of unary and binary operators *)
 
 Definition sem_unary_operation
-           (op: unary_operation) (v: val) (tfrom tto: mytype) (m: mem) (ce: composite_env) : option val :=
+           (op: unary_operation) (v: val) (tfrom tto: type) (m: mem) (ce: composite_env) : option val :=
   match sem_cast v tto tfrom m ce with
   | Some v' =>
     match op with
@@ -1254,7 +1254,7 @@ Definition sem_unary_operation
     | O_bnot => sem_bnot v' tto
     | O_lnot =>
       match sem_lnot v' tto m with
-      | Some v'' => sem_cast v'' (MTprim (PTint I32 Signed)) tto m ce
+      | Some v'' => sem_cast v'' (Tprim (PTint I32 Signed)) tto m ce
       | None => None
       end
     | O_neg => sem_neg v' tto
@@ -1268,7 +1268,7 @@ Definition sem_unary_operation
 
 Definition sem_binary_operation
     (op: binary_operation)
-    (v1: val) (mt1: mytype) (v2: val) (mt2: mytype) (mt: mytype)
+    (v1: val) (mt1: type) (v2: val) (mt2: type) (mt: type)
     (m: mem) (ce: composite_env) : option val :=
   match op with
   | O_add =>
@@ -1315,7 +1315,7 @@ Definition sem_binary_operation
     match sem_cast v1 mt1 mt m ce, sem_cast v2 mt2 mt m ce with
     | Some v1', Some v2' =>
       match sem_land v1' mt v2' mt m ce with
-      | Some v => sem_cast v (MTprim (PTint I32 Signed)) mt m ce
+      | Some v => sem_cast v (Tprim (PTint I32 Signed)) mt m ce
       | None => None
       end
     | _, _ => None
@@ -1324,7 +1324,7 @@ Definition sem_binary_operation
     match sem_cast v1 mt1 mt m ce, sem_cast v2 mt2 mt m ce with
     | Some v1', Some v2' =>
       match sem_lior v1' mt v2' mt m ce with
-      | Some v => sem_cast v (MTprim (PTint I32 Signed)) mt m ce
+      | Some v => sem_cast v (Tprim (PTint I32 Signed)) mt m ce
       | None => None
       end
     | _, _ => None
@@ -1355,82 +1355,82 @@ Definition sem_binary_operation
     | _, _ => None
     end
   | O_cmp pt =>
-    match sem_cast v1 mt1 (MTprim pt) m ce, sem_cast v2 mt2 (MTprim pt) m ce with
+    match sem_cast v1 mt1 (Tprim pt) m ce, sem_cast v2 mt2 (Tprim pt) m ce with
     | Some v1', Some v2' =>
-      match sem_cmp v1' (MTprim pt) v2' (MTprim pt) m ce with
-      | Some v => sem_cast v (MTprim (PTint I32 Signed)) mt m ce
+      match sem_cmp v1' (Tprim pt) v2' (Tprim pt) m ce with
+      | Some v => sem_cast v (Tprim (PTint I32 Signed)) mt m ce
       | None => None
       end
     | _, _ => None
     end
   | O_cmpg pt =>
-    match sem_cast v1 mt1 (MTprim pt) m ce, sem_cast v2 mt2 (MTprim pt) m ce with
+    match sem_cast v1 mt1 (Tprim pt) m ce, sem_cast v2 mt2 (Tprim pt) m ce with
     | Some v1', Some v2' =>
-      match sem_cmpg v1' (MTprim pt) v2' (MTprim pt) m ce with
-      | Some v => sem_cast v (MTprim (PTint I32 Signed)) mt m ce
+      match sem_cmpg v1' (Tprim pt) v2' (Tprim pt) m ce with
+      | Some v => sem_cast v (Tprim (PTint I32 Signed)) mt m ce
       | None => None
       end
     | _, _ => None
     end
   | O_cmpl pt =>
-    match sem_cast v1 mt1 (MTprim pt) m ce, sem_cast v2 mt2 (MTprim pt) m ce with
+    match sem_cast v1 mt1 (Tprim pt) m ce, sem_cast v2 mt2 (Tprim pt) m ce with
     | Some v1', Some v2' =>
-      match sem_cmpl v1' (MTprim pt) v2' (MTprim pt) m ce with
-      | Some v => sem_cast v (MTprim (PTint I32 Signed)) mt m ce
+      match sem_cmpl v1' (Tprim pt) v2' (Tprim pt) m ce with
+      | Some v => sem_cast v (Tprim (PTint I32 Signed)) mt m ce
       | None => None
       end
     | _, _ => None
     end
   | O_eq pt =>
-    match sem_cast v1 mt1 (MTprim pt) m ce, sem_cast v2 mt2 (MTprim pt) m ce with
+    match sem_cast v1 mt1 (Tprim pt) m ce, sem_cast v2 mt2 (Tprim pt) m ce with
     | Some v1', Some v2' =>
-      match sem_cmp_bool Ceq v1' (MTprim pt) v2' (MTprim pt) m ce with
-      | Some v => sem_cast v (MTprim (PTint I32 Signed)) mt m ce
+      match sem_cmp_bool Ceq v1' (Tprim pt) v2' (Tprim pt) m ce with
+      | Some v => sem_cast v (Tprim (PTint I32 Signed)) mt m ce
       | None => None
       end
     | _, _ => None
     end
   | O_ne pt =>
-    match sem_cast v1 mt1 (MTprim pt) m ce, sem_cast v2 mt2 (MTprim pt) m ce with
+    match sem_cast v1 mt1 (Tprim pt) m ce, sem_cast v2 mt2 (Tprim pt) m ce with
     | Some v1', Some v2' =>
-      match sem_cmp_bool Cne v1' (MTprim pt) v2' (MTprim pt) m ce with
-      | Some v => sem_cast v (MTprim (PTint I32 Signed)) mt m ce
+      match sem_cmp_bool Cne v1' (Tprim pt) v2' (Tprim pt) m ce with
+      | Some v => sem_cast v (Tprim (PTint I32 Signed)) mt m ce
       | None => None
       end
     | _, _ => None
     end
   | O_lt pt =>
-    match sem_cast v1 mt1 (MTprim pt) m ce, sem_cast v2 mt2 (MTprim pt) m ce with
+    match sem_cast v1 mt1 (Tprim pt) m ce, sem_cast v2 mt2 (Tprim pt) m ce with
     | Some v1', Some v2' =>
-      match sem_cmp_bool Clt v1' (MTprim pt) v2' (MTprim pt) m ce with
-      | Some v => sem_cast v (MTprim (PTint I32 Signed)) mt m ce
+      match sem_cmp_bool Clt v1' (Tprim pt) v2' (Tprim pt) m ce with
+      | Some v => sem_cast v (Tprim (PTint I32 Signed)) mt m ce
       | None => None
       end
     | _, _ => None
     end
   | O_gt pt =>
-    match sem_cast v1 mt1 (MTprim pt) m ce, sem_cast v2 mt2 (MTprim pt) m ce with
+    match sem_cast v1 mt1 (Tprim pt) m ce, sem_cast v2 mt2 (Tprim pt) m ce with
     | Some v1', Some v2' =>
-      match sem_cmp_bool Cgt v1' (MTprim pt) v2' (MTprim pt) m ce with
-      | Some v => sem_cast v (MTprim (PTint I32 Signed)) mt m ce
+      match sem_cmp_bool Cgt v1' (Tprim pt) v2' (Tprim pt) m ce with
+      | Some v => sem_cast v (Tprim (PTint I32 Signed)) mt m ce
       | None => None
       end
     | _, _ => None
     end
   | O_le pt =>
-    match sem_cast v1 mt1 (MTprim pt) m ce, sem_cast v2 mt2 (MTprim pt) m ce with
+    match sem_cast v1 mt1 (Tprim pt) m ce, sem_cast v2 mt2 (Tprim pt) m ce with
     | Some v1', Some v2' =>
-      match sem_cmp_bool Cle v1' (MTprim pt) v2' (MTprim pt) m ce with
-      | Some v => sem_cast v (MTprim (PTint I32 Signed)) mt m ce
+      match sem_cmp_bool Cle v1' (Tprim pt) v2' (Tprim pt) m ce with
+      | Some v => sem_cast v (Tprim (PTint I32 Signed)) mt m ce
       | None => None
       end
     | _, _ => None
     end
   | O_ge pt =>
-    match sem_cast v1 mt1 (MTprim pt) m ce, sem_cast v2 mt2 (MTprim pt) m ce with
+    match sem_cast v1 mt1 (Tprim pt) m ce, sem_cast v2 mt2 (Tprim pt) m ce with
     | Some v1', Some v2' =>
-      match sem_cmp_bool Cge v1' (MTprim pt) v2' (MTprim pt) m ce with
-      | Some v => sem_cast v (MTprim (PTint I32 Signed)) mt m ce
+      match sem_cmp_bool Cge v1' (Tprim pt) v2' (Tprim pt) m ce with
+      | Some v => sem_cast v (Tprim (PTint I32 Signed)) mt m ce
       | None => None
       end
     | _, _ => None
@@ -1438,7 +1438,7 @@ Definition sem_binary_operation
   end.
 
 Definition sem_trunc (v: val) (ptfrom ptto: prim_type) : option val :=
-  match classify_cast (MTprim ptfrom) (MTprim ptto), v with
+  match classify_cast (Tprim ptfrom) (Tprim ptto), v with
   | cast_case_f2i sz si, Vfloat f =>
     match cast_float_int si f with
     | Some i => Some (Vint (cast_int_int sz si i))
@@ -1559,7 +1559,7 @@ Definition ceil_single_long (si: signedness) (f: float32) : option int64 :=
   end.
 
 Definition sem_ceil (v: val) (ptfrom ptto: prim_type) : option val :=
-  match classify_cast (MTprim ptfrom) (MTprim ptto), v with
+  match classify_cast (Tprim ptfrom) (Tprim ptto), v with
   | cast_case_f2i sz si, Vfloat f =>
     match ceil_float_int si f with
     | Some i => Some (Vint (cast_int_int sz si i))
@@ -1680,7 +1680,7 @@ Definition floor_single_long (si: signedness) (f: float32) : option int64 :=
   end.
 
 Definition sem_floor (v: val) (ptfrom ptto: prim_type) : option val :=
-  match classify_cast (MTprim ptfrom) (MTprim ptto), v with
+  match classify_cast (Tprim ptfrom) (Tprim ptto), v with
   | cast_case_f2i sz si, Vfloat f =>
     match floor_float_int si f with
     | Some i => Some (Vint (cast_int_int sz si i))

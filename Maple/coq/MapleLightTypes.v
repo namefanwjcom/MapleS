@@ -74,89 +74,49 @@ Inductive prim_type : Type :=
   | PTfloat: floatsize -> prim_type              (**r floating-point types *)
 (*| PTComplex: complexsize -> type*).
 
-Inductive type : Type :=
-  | Tprim: prim_type -> type
-  | Tpointer: type -> type                 (**r pointer types ([*ty]) *)
-  | Tarray: type -> Z -> type              (**r array types ([ty[len]]) *)
-  | Tfunction: typelist -> typelist -> type    (**r function types *)
-  | Tcomposite: ident -> type
-  | Tid: ident ->  type
-with typelist : Type :=
-  | Tnil: typelist
-  | Tcons: type -> typelist -> typelist.
-
-Local Open Scope error_monad_scope.
-
-Inductive mytype : Type :=
-  | MTprim: prim_type -> mytype
-  | MTpointer: mytype -> mytype                 (**r pointer types ([*ty]) *)
-  | MTarray: mytype -> Z -> mytype              (**r array types ([ty[len]]) *)
-  | MTfunction: mytypelist -> mytypelist -> mytype    (**r function types *)
-  | MTcomposite: ident -> mytype
-with mytypelist : Type :=
-  | MTnil: mytypelist
-  | MTcons: mytype -> mytypelist -> mytypelist.
-
 Lemma intsize_eq: forall (s1 s2: intsize), {s1=s2} + {s1<>s2}.
 Proof.
   decide equality.
-Defined.
+Qed.
+
+Lemma floatsize_eq: forall (s1 s2: floatsize), {s1=s2} + {s1<>s2}.
+Proof.
+  decide equality.
+Qed.
+
+Lemma signedness_eq: forall (s1 s2: signedness), {s1=s2} + {s1<>s2}.
+Proof.
+  decide equality.
+Qed.
 
 Lemma prim_type_eq: forall (pt1 pt2: prim_type), {pt1=pt2} + {pt1<>pt2}.
 Proof.
   intros. repeat (decide equality).
 Qed.
 
-Lemma mytype_eq: forall (ty1 ty2: mytype), {ty1=ty2} + {ty1<>ty2}
-with mytypelist_eq: forall (tyl1 tyl2: mytypelist), {tyl1=tyl2} + {tyl1<>tyl2}.
-Admitted.
-(*Proof.
-  assert (forall (x y: signedness), {x=y} + {x<>y}) by decide equality.
-  assert (forall (x y: floatsize), {x=y} + {x<>y}) by decide equality.
-  assert (forall (x y: attr), {x=y} + {x<>y}).
-  { decide equality. decide equality. apply N.eq_dec. apply bool_dec. }
-  generalize ident_eq zeq bool_dec ident_eq intsize_eq; intros.
-  decide equality.
-  decide equality.
-  decide equality.
-Defined.*)
+Opaque intsize_eq floatsize_eq signedness_eq prim_type_eq.
 
-Opaque mytype_eq mytypelist_eq.
+Inductive type : Type :=
+  | Tprim: prim_type -> type
+  | Tpointer: type -> type
+  | Tarray: type -> Z -> type
+  | Tfunction: typelist -> typelist -> type
+  | Tcomposite: ident -> type
+with typelist : Type :=
+  | Tnil: typelist
+  | Tcons: type -> typelist -> typelist.
 
-Fixpoint type_to_mytype (e: PTree.t mytype) (ty: type) : res mytype :=
-  match ty with
-  | Tprim ty' => OK (MTprim ty')
-  | Tpointer ty' => do mt <- type_to_mytype e ty'; OK (MTpointer mt)
-  | Tarray ty' n => do mt <- type_to_mytype e ty'; OK (MTarray mt n)
-  | Tfunction tl1 tl2 => do mtl1 <- typelist_to_mytypelist e tl1; do mtl2 <- typelist_to_mytypelist e tl2; OK (MTfunction mtl1 mtl2)
-  | Tcomposite id => OK (MTcomposite id)
-  | Tid id =>
-    match e ! id with
-    | Some mt => OK mt
-    | None => Error (MSG "type " :: CTX id :: MSG " is not declared" :: nil)
-    end
-  end
-with typelist_to_mytypelist (e: PTree.t mytype) (tl: typelist) : res mytypelist :=
-       match tl with
-       | Tnil => OK MTnil
-       | Tcons ty tl' => do mt <- type_to_mytype e ty; do mtl' <- typelist_to_mytypelist e tl'; OK (MTcons mt mtl')
-       end.
+Lemma type_eq: forall (ty1 ty2: type), {ty1=ty2} + {ty1<>ty2}
+with typelist_eq: forall (tyl1 tyl2: typelist), {tyl1=tyl2} + {tyl1<>tyl2}.
+Proof.
+  - decide equality. apply prim_type_eq.
+    apply zeq. apply ident_eq.
+  - decide equality.
+Qed.
 
-Fixpoint listtype_to_listmytype (e: PTree.t mytype) (tl: list type) : res (list mytype) :=
-  match tl with
-  | nil => OK nil
-  | cons ty tl' => do mt <- type_to_mytype e ty; do mtl' <- listtype_to_listmytype e tl'; OK (cons mt mtl')
-  end.
+Opaque type_eq typelist_eq.
 
-Definition add_type (e: PTree.t mytype) (idty: ident * type) : res (PTree.t mytype) :=
-  let (id, ty) := idty in
-  match e ! id with
-  | Some _ => Error (MSG "Multiple definitions of " :: CTX id :: nil)
-  | None => do mt <- type_to_mytype e ty; OK (PTree.set id mt e)
-  end.
-
-Definition add_types (l: list (ident * type)) : res (PTree.t mytype) :=
-  mfold_left add_type l (PTree.empty mytype).
+Local Open Scope error_monad_scope.
 
 (*
 (** Extract the attributes of a type. *)
@@ -259,10 +219,10 @@ Record class_attr := {
   ca_final: bool;
 }.
 
-Record interface_attr := {
+(*Record interface_attr := {
   ia_access: access_modifier;
   ia_abstract: bool;
-}.
+}.*)
 
 Inductive membervars : Type :=
   | MVnil: membervars
@@ -276,23 +236,9 @@ Inductive composite_definition : Type :=
   | CDstruct: membervars -> composite_definition
   | CDunion: membervars -> composite_definition
   | CDclass: option ident -> list ident -> membervars -> memberfuncs -> class_attr -> composite_definition
-  | CDinterface: list ident -> membervars -> memberfuncs -> interface_attr -> composite_definition.
+  | CDinterface: list ident -> membervars -> memberfuncs -> class_attr -> composite_definition.
 
-Inductive mymembervars : Type :=
-  | MMVnil: mymembervars
-  | MMVcons: ident -> mytype -> type_attr -> field_attr -> mymembervars -> mymembervars.
-
-Inductive mymemberfuncs : Type :=
-  | MMFnil : mymemberfuncs
-  | MMFcons: ident -> ident -> mytype -> func_attr -> mymemberfuncs -> mymemberfuncs.
-
-Inductive mycomposite_definition : Type :=
-  | MCDstruct: mymembervars -> mycomposite_definition
-  | MCDunion: mymembervars -> mycomposite_definition
-  | MCDclass: option ident -> list ident -> mymembervars -> mymemberfuncs -> class_attr -> mycomposite_definition
-  | MCDinterface: list ident -> mymembervars -> mymemberfuncs -> interface_attr -> mycomposite_definition.
-
-Definition mycomposite_def_eq (x y: mycomposite_definition): {x=y} + {x<>y}.
+Definition mycomposite_def_eq (x y: composite_definition): {x=y} + {x<>y}.
 Admitted.
 (*Proof.
   decide equality.
@@ -304,70 +250,28 @@ Defined.*)
 
 Global Opaque mycomposite_def_eq. 
 
-Fixpoint membervars_to_mymembervars (e: PTree.t mytype) (l: membervars) : res mymembervars :=
-  match l with
-  | MVnil => OK MMVnil
-  | MVcons id ty ta fia l' => do mt <- type_to_mytype e ty; do ml' <- membervars_to_mymembervars e l'; OK (MMVcons id mt ta fia ml')
-  end.
-
-Fixpoint memberfuncs_to_mymemberfuncs (e: PTree.t mytype) (l: memberfuncs) : res mymemberfuncs :=
-  match l with
-  | MFnil => OK MMFnil
-  | MFcons cid fid ty fa l' =>
-    do mt <- type_to_mytype e ty;
-    do ml' <- memberfuncs_to_mymemberfuncs e l';
-    OK (MMFcons cid fid mt fa ml')
-  end.
-
-Fixpoint composite_definition_to_mycomposite_definition (e: PTree.t mytype) (cd: composite_definition) : res mycomposite_definition :=
-  match cd with
-  | CDstruct mvl =>
-    do mmvl <- membervars_to_mymembervars e mvl;
-    OK (MCDstruct mmvl)
-  | CDunion mvl =>
-    do mmvl <- membervars_to_mymembervars e mvl;
-    OK (MCDunion mmvl)
-  | CDclass pid idl mvl mfl ca =>
-    do mmvl <- membervars_to_mymembervars e mvl;
-    do mmfl <- memberfuncs_to_mymemberfuncs e mfl;
-    OK (MCDclass pid idl mmvl mmfl ca)
-  | CDinterface idl mvl mfl ia =>
-    do mmvl <- membervars_to_mymembervars e mvl;
-    do mmfl <- memberfuncs_to_mymemberfuncs e mfl;
-    OK (MCDinterface idl mmvl mmfl ia)
-  end.
-
-Fixpoint composite_definitions_to_mycomposite_definitions (e: PTree.t mytype) (l: list (ident * composite_definition)) : res (list (ident * mycomposite_definition)) :=
-  match l with
-  | nil => OK nil
-  | (id, cd) :: l' =>
-    do mcd <- composite_definition_to_mycomposite_definition e cd;
-    do ml' <- composite_definitions_to_mycomposite_definitions e l';
-    OK ((id, mcd) :: ml')
-  end.
-
 (** For type-checking, compilation and semantics purposes, the composite
   definitions are collected in the following [composite_env] environment.
   The [composite] record contains additional information compared with
   the [composite_definition], such as size and alignment information. *)
 
-Fixpoint lengthof_mymembervars (l: mymembervars) : nat :=
+Fixpoint lengthof_membervars (l: membervars) : nat :=
   match l with
-  | MMVnil => 0
-  | MMVcons _ _ _ _ l' => S (lengthof_mymembervars l')
+  | MVnil => 0
+  | MVcons _ _ _ _ l' => S (lengthof_membervars l')
   end.
 
-Definition lengthof_composite (mcd: mycomposite_definition) : nat :=
-  match mcd with
-  | MCDstruct l => lengthof_mymembervars l
-  | MCDunion l => lengthof_mymembervars l
-  | MCDclass (Some _) _ l _ _ => S (lengthof_mymembervars l)
-  | MCDclass None _ l _ _ => S (lengthof_mymembervars l)
-  | MCDinterface _ l _ _ => lengthof_mymembervars l
+Definition lengthof_composite (cd: composite_definition) : nat :=
+  match cd with
+  | CDstruct l => lengthof_membervars l
+  | CDunion l => lengthof_membervars l
+  | CDclass (Some _) _ l _ _ => S (lengthof_membervars l)
+  | CDclass None _ l _ _ => S (lengthof_membervars l)
+  | CDinterface _ l _ _ => lengthof_membervars l
   end.
 
 Record composite : Type := {
-  co_def: mycomposite_definition;
+  co_def: composite_definition;
   co_sizeof: Z;
   co_alignof: Z;
   co_rank: nat;
@@ -375,9 +279,9 @@ Record composite : Type := {
   co_depth: N;
   co_superclasses: list ident;
   co_superinterfaces: list ident;
-  co_sizeof_pos: co_sizeof >= 0;
+  (*co_sizeof_pos: co_sizeof >= 0;
   co_alignof_two_p: exists n, co_alignof = two_power_nat n;
-  co_sizeof_alignof: (co_alignof | co_sizeof);
+  co_sizeof_alignof: (co_alignof | co_sizeof);*)
 }.
 
 Definition composite_env : Type := PTree.t composite.
@@ -390,32 +294,32 @@ Definition composite_env : Type := PTree.t composite.
   and degrades array types and function types to pointer types.
   Attributes are erased. *)
 
-Definition mytypeconv (mt: mytype) : mytype :=
+Definition typeconv (mt: type) : type :=
   match mt with
-  | MTprim pt =>
+  | Tprim pt =>
     match pt with
-    | PTint (I8 | I16) _ | PTbool => MTprim (PTint I32 Signed)
-    | _ => MTprim pt
+    | PTint (I8 | I16) _ | PTbool => Tprim (PTint I32 Signed)
+    | _ => Tprim pt
     end
-  | MTarray mt' sz => MTpointer mt'
-  | MTfunction _ _ => MTpointer mt
+  | Tarray mt' sz => Tpointer mt'
+  | Tfunction _ _ => Tpointer mt
   | _ => mt
   end.
 
 (** Default conversion for arguments to an unprototyped or variadic function.
   Like [typeconv] but also converts single floats to double floats. *)
 
-Definition default_argument_conversion (mt: mytype) : mytype :=
-  match mt with
-  | MTprim pt =>
+Definition default_argument_conversion (t: type) : type :=
+  match t with
+  | Tprim pt =>
     match pt with
-    | PTint (I8 | I16) _ => MTprim (PTint I32 Signed)
-    | PTfloat F32 => MTprim (PTfloat F64)
-    | _ => MTprim pt
+    | PTint (I8 | I16) _ => Tprim (PTint I32 Signed)
+    | PTfloat F32 => Tprim (PTfloat F64)
+    | _ => Tprim pt
     end
-  | MTarray mt' sz => MTpointer mt'
-  | MTfunction _ _ => MTpointer mt
-  | _ => mt
+  | Tarray t' sz => Tpointer t'
+  | Tfunction _ _ => Tpointer t
+  | _ => t
   end.
 
 Section Type_properties.
@@ -441,41 +345,42 @@ Fixpoint complete_idlist (l: list ident) : bool :=
   | id :: l' => complete_id id && complete_idlist l'
   end.
 
-Fixpoint complete_mytype (mt: mytype) : bool :=
+Fixpoint complete_type (mt: type) : bool :=
   match mt with
-  | MTprim pt =>
+  | Tprim pt =>
     match pt with
+    | PTvoid => true
     | PTint _ _ => true
     | PTbool => true
     | PTfloat _ => true
     | _ => false
     end
-  | MTpointer _ => true
-  | MTarray ty' _ => complete_mytype ty'
-  | MTfunction l1 l2 => complete_mytypelist l1 && complete_mytypelist l2
-  | MTcomposite id => complete_id id
+  | Tpointer _ => true
+  | Tarray ty' _ => complete_type ty'
+  | Tfunction l1 l2 => complete_typelist l1 && complete_typelist l2
+  | Tcomposite id => complete_id id
   end
-with complete_mytypelist (l: mytypelist) : bool :=
+with complete_typelist (l: typelist) : bool :=
        match l with
-       | MTnil => true
-       | MTcons t l' => complete_mytype t && complete_mytypelist l'
+       | Tnil => true
+       | Tcons t l' => complete_type t && complete_typelist l'
        end.
 
-Definition add_complete_mytype (e: PTree.t mytype) (idmt: ident * mytype) : res (PTree.t mytype) :=
+Definition add_complete_type (e: PTree.t type) (idmt: ident * type) : res (PTree.t type) :=
   let (id, mt) := idmt in
   match e ! id with
   | Some _ => Error (MSG "Multiple definitions of " :: CTX id :: nil)
   | None =>
-    match (complete_mytype mt) with
+    match (complete_type mt) with
     | true => OK (PTree.set id mt e)
     | false => Error (MSG "incomplete type " :: CTX id :: nil)
     end
   end.
 
-Fixpoint add_complete_mytypes (l: list (ident * mytype)) : res (PTree.t mytype) :=
-  mfold_left add_complete_mytype l (PTree.empty mytype).
+Fixpoint add_complete_types (l: list (ident * type)) : res (PTree.t type) :=
+  mfold_left add_complete_type l (PTree.empty type).
 
-Fixpoint check_complete' (te : PTree.t mytype) (id : positive) : res (PTree.t mytype) :=
+Fixpoint check_complete' (te : PTree.t type) (id : positive) : res (PTree.t type) :=
   match te with
   | PTree.Leaf => OK PTree.Leaf
   | PTree.Node l o r =>
@@ -483,7 +388,7 @@ Fixpoint check_complete' (te : PTree.t mytype) (id : positive) : res (PTree.t my
       do r' <- check_complete' r (id~1) % positive;
       match o with
       | Some mt =>
-        match complete_mytype mt with
+        match complete_type mt with
         | true =>
           OK (PTree.Node l' (Some mt) r')
         | false => Error (MSG "incomplete type " :: CTX id :: nil)
@@ -492,7 +397,7 @@ Fixpoint check_complete' (te : PTree.t mytype) (id : positive) : res (PTree.t my
       end
   end.
 
-Definition check_complete (te : PTree.t mytype) : res (PTree.t mytype) :=
+Definition check_complete (te : PTree.t type) : res (PTree.t type) :=
   check_complete' te 1.
 
 (** ** Depth of composite *)
@@ -509,13 +414,13 @@ Fixpoint maxdepthof_idlist (l: list ident) : N :=
   | id :: l' => N.max (depthof_id id) (maxdepthof_idlist l')
   end.
 
-Definition depthof_composite (mcd: mycomposite_definition) : N :=
+Definition depthof_composite (mcd: composite_definition) : N :=
   match mcd with
-  | MCDstruct l => 0
-  | MCDunion l => 0
-  | MCDclass (Some pid) li l1 l2 ca => N.succ (N.max (depthof_id pid) (maxdepthof_idlist li))
-  | MCDclass None li l1 l2 ca => N.succ (maxdepthof_idlist li)
-  | MCDinterface li l1 l2 ia => N.succ (maxdepthof_idlist li)
+  | CDstruct l => 0
+  | CDunion l => 0
+  | CDclass (Some pid) li l1 l2 ca => N.succ (N.max (depthof_id pid) (maxdepthof_idlist li))
+  | CDclass None li l1 l2 ca => N.succ (maxdepthof_idlist li)
+  | CDinterface li l1 l2 ia => N.succ (maxdepthof_idlist li)
   end.
 
 Definition superclasses_id (id: ident) : list ident :=
@@ -536,21 +441,22 @@ Fixpoint superinterfaces_idlist (l: list ident) : list ident :=
   | id :: l' => nodup ident_eq (superinterfaces_id id ++ superinterfaces_idlist l')
   end.
 
-Definition superclasses_composite (mcd: mycomposite_definition) : list ident :=
+Definition superclasses_composite (mcd: composite_definition) : list ident :=
   match mcd with
-  | MCDstruct l => nil
-  | MCDunion l => nil
-  | MCDclass (Some pid) li l1 l2 ca => pid :: superclasses_id pid
-  | MCDclass None li l1 l2 ca => nil
-  | MCDinterface li l1 l2 ia => nil
+  | CDstruct l => nil
+  | CDunion l => nil
+  | CDclass (Some pid) li l1 l2 ca => pid :: superclasses_id pid
+  | CDclass None li l1 l2 ca => nil
+  | CDinterface li l1 l2 ia => nil
   end.
 
-Definition superinterfaces_composite (mcd: mycomposite_definition) : list ident :=
+Definition superinterfaces_composite (mcd: composite_definition) : list ident :=
   match mcd with
-  | MCDstruct l => nil
-  | MCDunion l => nil
-  | MCDclass _ li l1 l2 ca => nodup ident_eq (superinterfaces_idlist li)
-  | MCDinterface li l1 l2 ia => nodup ident_eq (superinterfaces_idlist li)
+  | CDstruct l => nil
+  | CDunion l => nil
+  | CDclass (Some pid) li l1 l2 ca => nodup ident_eq (superinterfaces_id pid ++ li ++ superinterfaces_idlist li)
+  | CDclass None li l1 l2 ca => nodup ident_eq (li ++ superinterfaces_idlist li)
+  | CDinterface li l1 l2 ia => nodup ident_eq (li ++ superinterfaces_idlist li)
   end.
 
 (** ** Alignment of a type *)
@@ -569,10 +475,10 @@ Definition align_attr (a: type_attr) (al: Z) : Z :=
   types.  However, it is convenient that [alignof] is a total
   function.  For incomplete types, it returns 1. *)
 
-Fixpoint alignof (mt: mytype) (a: type_attr) : Z :=
+Fixpoint alignof (mt: type) (a: type_attr) : Z :=
   align_attr a
     match mt with
-    | MTprim pt =>
+    | Tprim pt =>
       match pt with
       | PTvoid => 1
       | PTint I8 _ => 1
@@ -588,10 +494,10 @@ Fixpoint alignof (mt: mytype) (a: type_attr) : Z :=
       | PTaddr A64 => if Archi.ptr64 then 8 else 4
       | PTagg => 1
       end
-    | MTpointer _ => if Archi.ptr64 then 8 else 4
-    | MTarray ty' _ => alignof ty' default_type_attr
-    | MTfunction l1 l2 => 1
-    | MTcomposite id =>
+    | Tpointer _ => if Archi.ptr64 then 8 else 4
+    | Tarray ty' _ => alignof ty' default_type_attr
+    | Tfunction l1 l2 => 1
+    | Tcomposite id =>
       match ce ! id with
       | Some co => co.(co_alignof)
       | None => 1
@@ -643,10 +549,10 @@ Qed.*)
   their size to be 1.  For undefined structures and unions, the size is
   arbitrarily taken to be 0.
 *)
-Fixpoint sizeof (mt: mytype) (ta: type_attr) : Z :=
+Fixpoint sizeof (mt: type) (ta: type_attr) : Z :=
   align_attr ta
     match mt with
-    | MTprim pt =>
+    | Tprim pt =>
       match pt with
       | PTvoid => 1
       | PTint I8 _ => 1
@@ -662,10 +568,10 @@ Fixpoint sizeof (mt: mytype) (ta: type_attr) : Z :=
       | PTaddr A64 => if Archi.ptr64 then 8 else 4
       | PTagg => 0
       end
-    | MTpointer _ => if Archi.ptr64 then 8 else 4
-    | MTarray ty' n => sizeof ty' default_type_attr * Z.max 0 n
-    | MTfunction l1 l2 => 1
-    | MTcomposite id =>
+    | Tpointer _ => if Archi.ptr64 then 8 else 4
+    | Tarray ty' n => sizeof ty' default_type_attr * Z.max 0 n
+    | Tfunction l1 l2 => 1
+    | Tcomposite id =>
       match ce ! id with
       | Some co => co.(co_sizeof)
       | None => 0
@@ -681,13 +587,13 @@ Fixpoint sizeof (mt: mytype) (ta: type_attr) : Z :=
   arbitrarily taken to be 0.
 *)
 
-Definition maxfield (ty: mytype) : N :=
+Definition maxfield (ty: type) : N :=
   match ty with
-  | MTprim ty' => 0
-  | MTpointer _ => 0
-  | MTarray ty' n => 0
-  | MTfunction l1 l2 => 0
-  | MTcomposite id =>
+  | Tprim ty' => 0
+  | Tpointer _ => 0
+  | Tarray ty' n => 0
+  | Tfunction l1 l2 => 0
+  | Tcomposite id =>
     match ce ! id with
     | Some mt => mt.(co_maxfield)
     | None => 0
@@ -737,52 +643,52 @@ Qed.
 (** The alignment for a structure or union is the max of the alignment
   of its members. *)
 
-Fixpoint alignof_mymembervars (l: mymembervars) : Z :=
+Fixpoint alignof_membervars (l: membervars) : Z :=
   match l with
-  | MMVnil => 1
-  | MMVcons _ t ta _ l' => Z.max (alignof t ta) (alignof_mymembervars l')
+  | MVnil => 1
+  | MVcons _ t ta _ l' => Z.max (alignof t ta) (alignof_membervars l')
   end.
 
-Definition alignof_composite (mcd: mycomposite_definition) : Z :=
+Definition alignof_composite (mcd: composite_definition) : Z :=
   match mcd with
-  | MCDstruct l => alignof_mymembervars l
-  | MCDunion l => alignof_mymembervars l
-  | MCDclass (Some pid) li l1 l2 ca =>
+  | CDstruct l => alignof_membervars l
+  | CDunion l => alignof_membervars l
+  | CDclass (Some pid) li l1 l2 ca =>
     match ce ! pid with
-    | Some co => Z.max co.(co_alignof) (alignof_mymembervars l1)
+    | Some co => Z.max co.(co_alignof) (alignof_membervars l1)
     | None => 1
     end
-  | MCDclass None li l1 l2 ca => alignof_mymembervars l1
-  | MCDinterface li l1 l2 ia => alignof_mymembervars l1
+  | CDclass None li l1 l2 ca => alignof_membervars l1
+  | CDinterface li l1 l2 ia => alignof_membervars l1
   end.
 
 (** The size of a structure corresponds to its layout: fields are
   laid out consecutively, and padding is inserted to align
   each field to the alignment for its type. *)
 
-Fixpoint sum_sizeof_mymembervars (l: mymembervars) (cur: Z) : Z :=
+Fixpoint sum_sizeof_membervars (l: membervars) (cur: Z) : Z :=
   match l with
-  | MMVnil => cur
-  | MMVcons _ t ta _ l' => sum_sizeof_mymembervars l' (align cur (alignof t ta) + sizeof t ta)
+  | MVnil => cur
+  | MVcons _ t ta _ l' => sum_sizeof_membervars l' (align cur (alignof t ta) + sizeof t ta)
   end.
 
-Fixpoint max_sizeof_mymembervars (l: mymembervars) : Z :=
+Fixpoint max_sizeof_membervars (l: membervars) : Z :=
   match l with
-  | MMVnil => 0
-  | MMVcons _ t ta _ l' => Z.max (sizeof t ta) (max_sizeof_mymembervars l')
+  | MVnil => 0
+  | MVcons _ t ta _ l' => Z.max (sizeof t ta) (max_sizeof_membervars l')
   end.
 
-Definition sizeof_composite (mcd: mycomposite_definition) : Z :=
+Definition sizeof_composite (mcd: composite_definition) : Z :=
   match mcd with
-  | MCDstruct l => sum_sizeof_mymembervars l 0
-  | MCDunion l => max_sizeof_mymembervars l
-  | MCDclass (Some pid) li l1 l2 ca =>
+  | CDstruct l => sum_sizeof_membervars l 0
+  | CDunion l => max_sizeof_membervars l
+  | CDclass (Some pid) li l1 l2 ca =>
     match ce ! pid with
-    | Some co => sum_sizeof_mymembervars l1 co.(co_sizeof)
+    | Some co => sum_sizeof_membervars l1 co.(co_sizeof)
     | None => 0
     end
-  | MCDclass None li l1 l2 ca => sum_sizeof_mymembervars l1 0
-  | MCDinterface li l1 l2 ia => sum_sizeof_mymembervars l1 0
+  | CDclass None li l1 l2 ca => sum_sizeof_membervars l1 0
+  | CDinterface li l1 l2 ia => sum_sizeof_membervars l1 0
   end.
 (*
 Lemma alignof_composite_two_p:
@@ -823,42 +729,42 @@ Qed.
 
 (** ** Maximum field for composite definitions *)
 
-Fixpoint maxfield_mymembervars (l: mymembervars) : N :=
+Fixpoint maxfield_membervars (l: membervars) : N :=
   match l with
-  | MMVnil => 0
-  | MMVcons _ t _ _ l' => 1 + maxfield t + maxfield_mymembervars l'
+  | MVnil => 0
+  | MVcons _ t _ _ l' => 1 + maxfield t + maxfield_membervars l'
   end.
 
-Fixpoint maxfield_composite (mcd: mycomposite_definition) : N :=
+Fixpoint maxfield_composite (mcd: composite_definition) : N :=
   match mcd with
-  | MCDstruct l => maxfield_mymembervars l
-  | MCDunion l => maxfield_mymembervars l
-  | MCDclass (Some pid) li l1 l2 ca =>
+  | CDstruct l => maxfield_membervars l
+  | CDunion l => maxfield_membervars l
+  | CDclass (Some pid) li l1 l2 ca =>
     match ce ! pid with
-    | Some co => 1 + co.(co_maxfield) + maxfield_mymembervars l1
+    | Some co => 1 + co.(co_maxfield) + maxfield_membervars l1
     | None => 0
     end
-  | MCDclass None li l1 l2 ca => maxfield_mymembervars l1
-  | MCDinterface li l1 l2 ia => maxfield_mymembervars l1
+  | CDclass None li l1 l2 ca => maxfield_membervars l1
+  | CDinterface li l1 l2 ia => maxfield_membervars l1
   end.
 
-Fixpoint memberfield_mymembervars (l: mymembervars) : list N :=
+Fixpoint memberfield_membervars (l: membervars) : list N :=
   match l with
-  | MMVnil => nil
-  | MMVcons _ t _ _ l' => (1 + maxfield t) % N :: memberfield_mymembervars l'
+  | MVnil => nil
+  | MVcons _ t _ _ l' => (1 + maxfield t) % N :: memberfield_membervars l'
   end.
 
-Fixpoint memberfield_composite (mcd: mycomposite_definition) : list N :=
+Fixpoint memberfield_composite (mcd: composite_definition) : list N :=
   match mcd with
-  | MCDstruct l => memberfield_mymembervars l
-  | MCDunion l => memberfield_mymembervars l
-  | MCDclass (Some pid) li l1 l2 ca =>
+  | CDstruct l => memberfield_membervars l
+  | CDunion l => memberfield_membervars l
+  | CDclass (Some pid) li l1 l2 ca =>
     match ce ! pid with
-    | Some co => (1 + co.(co_maxfield)) % N :: memberfield_mymembervars l1
+    | Some co => (1 + co.(co_maxfield)) % N :: memberfield_membervars l1
     | None => nil
     end
-  | MCDclass None li l1 l2 ca => memberfield_mymembervars l1
-  | MCDinterface li l1 l2 ia => memberfield_mymembervars l1
+  | CDclass None li l1 l2 ca => memberfield_membervars l1
+  | CDinterface li l1 l2 ia => memberfield_membervars l1
   end.
 
 (** Type ranks *)
@@ -869,10 +775,10 @@ Fixpoint memberfield_composite (mcd: mycomposite_definition) : list N :=
   Type ranks ensure that type expressions (ignoring pointer and function types)
   have an inductive structure. *)
 
-Fixpoint rank (mt: mytype) : nat :=
+Fixpoint rank (mt: type) : nat :=
   match mt with
-  | MTarray mt' _ => S (rank mt')
-  | MTcomposite id =>
+  | Tarray mt' _ => S (rank mt')
+  | Tcomposite id =>
       match ce ! id with
       | None => O
       | Some co => co.(co_rank)
@@ -880,23 +786,23 @@ Fixpoint rank (mt: mytype) : nat :=
   | _ => O
   end.
 
-Fixpoint rank_mymembervars (l: mymembervars) : nat :=
+Fixpoint rank_membervars (l: membervars) : nat :=
   match l with
-  | MMVnil => 0%nat
-  | MMVcons _ mt _ _ l' => Peano.max (rank mt) (rank_mymembervars l')
+  | MVnil => 0%nat
+  | MVcons _ mt _ _ l' => Peano.max (rank mt) (rank_membervars l')
   end.
 
-Definition rank_composite (mcd: mycomposite_definition) : nat :=
+Definition rank_composite (mcd: composite_definition) : nat :=
   match mcd with
-  | MCDstruct l => rank_mymembervars l
-  | MCDunion l => rank_mymembervars l
-  | MCDclass (Some pid) li l1 l2 ca =>
+  | CDstruct l => rank_membervars l
+  | CDunion l => rank_membervars l
+  | CDclass (Some pid) li l1 l2 ca =>
     match ce ! pid with
-    | Some co => S (Peano.max co.(co_rank) (rank_mymembervars l1))
+    | Some co => S (Peano.max co.(co_rank) (rank_membervars l1))
     | None => 0
     end
-  | MCDclass None li l1 l2 ca => S (rank_mymembervars l1)
-  | MCDinterface li l1 l2 ia => S (rank_mymembervars l1)
+  | CDclass None li l1 l2 ca => S (rank_membervars l1)
+  | CDinterface li l1 l2 ia => S (rank_membervars l1)
   end.
 
 (** ** Byte offset for a field of a structure *)
@@ -909,8 +815,8 @@ Definition rank_composite (mcd: mycomposite_definition) : nat :=
 Fixpoint fieldoffset_id (e: typingenv) (id: ident) (field: positive) : option Z :=
   match e ! id with
   | Some mt =>
-    match mt.(mytype_type) with
-    | Tstruct _ | Tunion _ | Tclass _ _ _ _ | Tinterface _ _ _  => mt.(mytype_fieldoffset) ! field
+    match mt.(type_type) with
+    | Tstruct _ | Tunion _ | Tclass _ _ _ _ | Tinterface _ _ _  => mt.(type_fieldoffset) ! field
     | _ => None
     end
   | None => None
@@ -937,21 +843,21 @@ Proof.
   apply Pos2Nat.is_pos. apply nat_of_P_lt_Lt_compare_morphism; auto.
 Qed.*)
 
-Fixpoint search_in_mymembervars_struct (l: mymembervars) (fi: positive) (cur: Z) : res (mytype * N * Z) :=
+Fixpoint search_in_membervars_struct (l: membervars) (fi: positive) (cur: Z) : res (type * N * Z) :=
   match l with
-  | MMVnil => Error (MSG "field-id" :: CTX fi :: nil)
-  | MMVcons _ mt ta _ l' =>
+  | MVnil => Error (MSG "field-id" :: CTX fi :: nil)
+  | MVcons _ mt ta _ l' =>
     let n := N_to_positive (N.succ (maxfield mt)) in
     match Pos.leb fi n with
     | true => OK (mt, N.pred (Npos fi), align cur (alignof mt ta))
-    | false => search_in_mymembervars_struct l' (Pos.sub fi n) (align cur (alignof mt ta) + sizeof mt ta)
+    | false => search_in_membervars_struct l' (Pos.sub fi n) (align cur (alignof mt ta) + sizeof mt ta)
     end
   end.
 
-(*Lemma search_in_mymembervars_struct_decrease_rank:
+(*Lemma search_in_membervars_struct_decrease_rank:
   forall l fi cur mt fi' cur',
-    search_in_mymembervars_struct l fi cur = OK (mt, fi', cur') ->
-    (rank mt <= rank_mymembervars l) % nat.
+    search_in_membervars_struct l fi cur = OK (mt, fi', cur') ->
+    (rank mt <= rank_membervars l) % nat.
 Proof.
   intros l. induction l; intros; simpl in *.
   - inversion H.
@@ -960,34 +866,34 @@ Proof.
     + apply IHl in H. xomega.
 Qed.*)
 
-Lemma search_in_mymembervars_struct_decrease_field:
+Lemma search_in_membervars_struct_decrease_field:
   forall l fi cur mt fi' cur',
-    search_in_mymembervars_struct l fi cur = OK (mt, fi', cur') ->
+    search_in_membervars_struct l fi cur = OK (mt, fi', cur') ->
     (fi' < Npos fi) % N.
 Proof.
   intros l. induction l; intros; simpl in *.
   - inversion H.
-  - destruct (fi <=? N_to_positive (N.succ (maxfield m))) % positive eqn: E.
+  - destruct (fi <=? N_to_positive (N.succ (maxfield t))) % positive eqn: E.
     + inversion H; subst. rewrite N.pos_pred_spec. apply N.lt_pred_l. congruence.
     + apply IHl in H. eapply N.lt_trans; eauto. unfold N.lt. simpl.
       apply Pos.leb_gt in E. apply Pos.sub_decr. auto.
 Qed.
 
-Fixpoint search_in_mymembervars_union (l: mymembervars) (fi: positive) (cur: Z) : res (mytype * N * Z) :=
+Fixpoint search_in_membervars_union (l: membervars) (fi: positive) (cur: Z) : res (type * N * Z) :=
   match l with
-  | MMVnil => Error (MSG "field-id" :: CTX fi :: nil)
-  | MMVcons _ mt ta _ l' =>
+  | MVnil => Error (MSG "field-id" :: CTX fi :: nil)
+  | MVcons _ mt ta _ l' =>
     let n := N_to_positive (N.succ (maxfield mt)) in
     match Pos.leb fi n with
     | true => OK (mt, N.pred (Npos fi), align cur (alignof mt ta))
-    | false => search_in_mymembervars_union l' (Pos.sub fi n) cur
+    | false => search_in_membervars_union l' (Pos.sub fi n) cur
     end
   end.
 
-(*Lemma search_in_mymembervars_union_decrease_rank:
+(*Lemma search_in_membervars_union_decrease_rank:
   forall l fi cur mt fi' cur',
-    search_in_mymembervars_union l fi cur = OK (mt, fi', cur') ->
-    (rank mt <= rank_mymembervars l) % nat.
+    search_in_membervars_union l fi cur = OK (mt, fi', cur') ->
+    (rank mt <= rank_membervars l) % nat.
 Proof.
   intros l. induction l; intros; simpl in *.
   - inversion H.
@@ -996,39 +902,39 @@ Proof.
     + apply IHl in H. xomega.
 Qed.*)
 
-Lemma search_in_mymembervars_union_decrease_field:
+Lemma search_in_membervars_union_decrease_field:
   forall l fi cur mt fi' cur',
-    search_in_mymembervars_union l fi cur = OK (mt, fi', cur') ->
+    search_in_membervars_union l fi cur = OK (mt, fi', cur') ->
     (fi' < Npos fi) % N.
 Proof.
   intros l. induction l; intros; simpl in *.
   - inversion H.
-  - destruct (fi <=? N_to_positive (N.succ (maxfield m))) % positive eqn: E.
+  - destruct (fi <=? N_to_positive (N.succ (maxfield t))) % positive eqn: E.
     + inversion H; subst. rewrite N.pos_pred_spec. apply N.lt_pred_l. congruence.
     + apply IHl in H. eapply N.lt_trans; eauto. unfold N.lt. simpl.
       apply Pos.leb_gt in E. apply Pos.sub_decr. auto.
 Qed.
 
-Program Definition fieldoffset_step (mt: mytype) (fi: positive) (cur: Z) : res (mytype * N * Z) :=
+Program Definition fieldoffset_step (mt: type) (fi: positive) (cur: Z) : res (type * N * Z) :=
   match mt with
-  | MTcomposite id =>
+  | Tcomposite id =>
     match ce ! id with
     | Some co =>
       match co.(co_def) with
-      | MCDstruct l => search_in_mymembervars_struct l fi 0
-      | MCDunion l => search_in_mymembervars_struct l fi 0
-      | MCDclass (Some pid) li l1 l2 ca =>
+      | CDstruct l => search_in_membervars_struct l fi 0
+      | CDunion l => search_in_membervars_struct l fi 0
+      | CDclass (Some pid) li l1 l2 ca =>
         match ce ! pid with
         | Some pco =>
           let n := N_to_positive (N.succ pco.(co_maxfield)) in
           match Pos.leb fi n with
-          | true => OK (MTcomposite pid, N.pred (Npos fi), align cur pco.(co_alignof))
-          | false => search_in_mymembervars_struct l1 (Pos.sub fi n) (align cur pco.(co_alignof) + pco.(co_sizeof))
+          | true => OK (Tcomposite pid, N.pred (Npos fi), align cur pco.(co_alignof))
+          | false => search_in_membervars_struct l1 (Pos.sub fi n) (align cur pco.(co_alignof) + pco.(co_sizeof))
           end
         | None => Error (MSG "unknown class name" :: CTX pid :: nil)
         end
-      | MCDclass None li l1 l2 ca => search_in_mymembervars_struct l1 fi 0
-      | MCDinterface li l1 l2 ia => search_in_mymembervars_struct l1 fi 0
+      | CDclass None li l1 l2 ca => search_in_membervars_struct l1 fi 0
+      | CDinterface li l1 l2 ia => search_in_membervars_struct l1 fi 0
       end
     | None => Error (MSG "unknown type name " :: CTX id :: nil)
     end
@@ -1042,15 +948,15 @@ Program Definition fieldoffset_step (mt: mytype) (fi: positive) (cur: Z) : res (
 Proof.
   intros. destruct mt; simpl in *; try congruence.
   destruct ce ! i eqn: E1. destruct (co_def c) eqn: E2; simpl in *.
-  - apply search_in_mymembervars_struct_decrease_rank in H. admit.
-  - apply search_in_mymembervars_struct_decrease_rank in H. admit.
+  - apply search_in_membervars_struct_decrease_rank in H. admit.
+  - apply search_in_membervars_struct_decrease_rank in H. admit.
   - destruct o eqn: E3.
     + destruct ce ! i0 eqn: E4; simpl in *; try congruence.
       destruct (fi <=? N_to_positive (N.succ (co_maxfield c0)))%positive.
       * inversion H; subst. admit.
-      * apply search_in_mymembervars_struct_decrease_rank in H. admit.
-    + apply search_in_mymembervars_struct_decrease_rank in H. admit.
-  - apply search_in_mymembervars_struct_decrease_rank in H. admit.
+      * apply search_in_membervars_struct_decrease_rank in H. admit.
+    + apply search_in_membervars_struct_decrease_rank in H. admit.
+  - apply search_in_membervars_struct_decrease_rank in H. admit.
 Admitted.*)
 
 Lemma fieldoffset_step_decrease_field:
@@ -1060,22 +966,22 @@ Lemma fieldoffset_step_decrease_field:
 Proof.
   intros. destruct mt; simpl in *; try congruence.
   destruct ce ! i eqn: E1. destruct (co_def c) eqn: E2; simpl in *.
-  - apply search_in_mymembervars_struct_decrease_field in H; auto.
-  - apply search_in_mymembervars_struct_decrease_field in H; auto.
+  - apply search_in_membervars_struct_decrease_field in H; auto.
+  - apply search_in_membervars_struct_decrease_field in H; auto.
   - destruct o eqn: E3.
     + destruct ce ! i0 eqn: E4; simpl in *; try congruence.
       destruct (fi <=? N_to_positive (N.succ (co_maxfield c1)))%positive eqn: E5.
       * inversion H; subst. rewrite N.pos_pred_spec.
         apply N.lt_pred_l. congruence.
-      * apply search_in_mymembervars_struct_decrease_field in H.
+      * apply search_in_membervars_struct_decrease_field in H.
         eapply N.lt_trans; eauto. unfold N.lt. simpl.
         apply Pos.leb_gt in E5. apply Pos.sub_decr. auto.
-    + apply search_in_mymembervars_struct_decrease_field in H; auto.
-  - apply search_in_mymembervars_struct_decrease_field in H; auto.
+    + apply search_in_membervars_struct_decrease_field in H; auto.
+  - apply search_in_membervars_struct_decrease_field in H; auto.
   - inversion H.
 Qed.
 
-(*Program Fixpoint fieldoffset_rec (e: composite_env) (mt: mytype) (fi: positive) (cur: Z) {measure (rank e mt)} : res (mytype * Z) :=
+(*Program Fixpoint fieldoffset_rec (e: composite_env) (mt: type) (fi: positive) (cur: Z) {measure (rank e mt)} : res (type * Z) :=
   match fieldoffset_step e mt fi cur with
   | OK (mt', N0, cur') => OK (mt', cur')
   | OK (mt', Npos p, cur') => fieldoffset_rec e mt' p cur'
@@ -1085,7 +991,7 @@ Next Obligation.
   eapply fieldoffset_step_decrease_rank; eauto.
 Qed.*)
 
-Program Fixpoint fieldoffset_rec (mt: mytype) (fi: positive) (cur: Z) {measure (Pos.to_nat fi)} : res (mytype * Z) :=
+Program Fixpoint fieldoffset_rec (mt: type) (fi: positive) (cur: Z) {measure (Pos.to_nat fi)} : res (type * Z) :=
   match fieldoffset_step mt fi cur with
   | OK (mt', N0, cur') => OK (mt', cur')
   | OK (mt', Npos p, cur') => fieldoffset_rec mt' p cur'
@@ -1097,7 +1003,7 @@ Next Obligation.
   unfold N.lt in *. simpl in *. apply nat_of_P_lt_Lt_compare_morphism; auto.
 Qed.
 
-Definition fieldoffset (mt: mytype) (fi: N) : res (mytype * Z) :=
+Definition fieldoffset (mt: type) (fi: N) : res (type * Z) :=
   match fi with
   | N0 => OK (mt, 0)
   | Npos p => fieldoffset_rec mt p 0
@@ -1198,9 +1104,9 @@ Inductive mode: Type :=
   | By_copy: mode
   | By_nothing: mode.
 
-Definition access_mode (mt: mytype) : mode :=
+Definition access_mode (mt: type) : mode :=
   match mt with
-  | MTprim pt =>
+  | Tprim pt =>
     match pt with
     | PTvoid => By_nothing
     | PTint I8 Signed => By_value Mint8signed
@@ -1217,10 +1123,10 @@ Definition access_mode (mt: mytype) : mode :=
     | PTaddr _ => By_value Mptr
     | PTagg => By_copy
     end
-  | MTpointer _ => By_value Mptr
-  | MTarray _ _ => By_reference
-  | MTfunction _ _ => By_reference
-  | MTcomposite id => By_copy
+  | Tpointer _ => By_value Mptr
+  | Tarray _ _ => By_reference
+  | Tfunction _ _ => By_reference
+  | Tcomposite id => By_copy
   end.
 (*
 (** For the purposes of the semantics and the compiler, a type denotes
@@ -1239,9 +1145,9 @@ Definition type_is_volatile (ty: type) : bool :=
   Block copy operations do not support alignments greater than 8,
   and require the size to be an integral multiple of the alignment. *)
 
-Fixpoint alignof_blockcopy (mt: mytype) : Z :=
+Fixpoint alignof_blockcopy (mt: type) : Z :=
   match mt with
-  | MTprim pt =>
+  | Tprim pt =>
     match pt with
     | PTvoid => 1
     | PTint I8 Signed => 8
@@ -1257,10 +1163,10 @@ Fixpoint alignof_blockcopy (mt: mytype) : Z :=
     | PTref => By_value Mptr
     | PTaddr _ => By_value Mptr
     end
-  | MTpointer _ => By_value Mptr
-  | MTarray _ _ => By_reference
-  | MTfunction _ _ => By_reference
-  | MTcomposite id => By_copy
+  | Tpointer _ => By_value Mptr
+  | Tarray _ _ => By_reference
+  | Tfunction _ _ => By_reference
+  | Tcomposite id => By_copy
   end.
 
 Lemma alignof_blockcopy_1248:
@@ -1380,37 +1286,51 @@ Proof.
   apply sizeof_union_pos.
 Qed.
  *)
-Fixpoint complete_mymembervars (l: mymembervars) : bool :=
+Fixpoint complete_membervars (l: membervars) : bool :=
   match l with
-  | MMVnil => true
-  | MMVcons _ mt _ _ l' => complete_mytype mt && complete_mymembervars l'
+  | MVnil => true
+  | MVcons _ mt _ _ l' => complete_type mt && complete_membervars l'
   end.
 
-Fixpoint complete_mymemberfuncs (l: mymemberfuncs) : bool :=
+Fixpoint complete_memberfuncs (l: memberfuncs) : bool :=
   match l with
-  | MMFnil => true
-  | MMFcons _ _ mt _ l' => complete_mytype mt && complete_mymemberfuncs l'
+  | MFnil => true
+  | MFcons _ _ mt _ l' => complete_type mt && complete_memberfuncs l'
   end.
 
 Definition valid_superclass_id (id: ident) : bool :=
   match ce ! id with
   | Some co =>
     match co_def co with
-    | MCDclass _ _ _ _ ca => negb (ca_final ca)
+    | CDclass _ _ _ _ ca => negb (ca_final ca)
     | _ => false
     end
   | None => false
   end.
 
+Lemma valid_superclass_id_implies_complete_id: forall id,
+    valid_superclass_id id = true -> complete_id id = true.
+Proof.
+  unfold valid_superclass_id, complete_id; intros.
+  destruct (ce!id); try congruence.
+Qed.
+
 Definition valid_interface_id (id: ident) : bool :=
   match ce ! id with
   | Some co =>
     match co_def co with
-    | MCDinterface _ _ _ _ => true
+    | CDinterface _ _ _ ca => true
     | _ => false
     end
   | None => false
   end.
+
+Lemma valid_interface_id_implies_complete_id: forall id,
+    valid_interface_id id = true -> complete_id id = true.
+Proof.
+  unfold valid_interface_id, complete_id; intros.
+  destruct (ce!id); try congruence.
+Qed.
 
 Fixpoint valid_interface_idlist (l: list ident) : bool :=
   match l with
@@ -1419,24 +1339,32 @@ Fixpoint valid_interface_idlist (l: list ident) : bool :=
     valid_interface_id id && valid_interface_idlist l'
   end.
 
-Fixpoint complete_composite (mcd: mycomposite_definition) : bool :=
+Lemma valid_interface_idlist_implies_complete_idlist: forall idl,
+    valid_interface_idlist idl = true -> complete_idlist idl = true.
+Proof.
+  induction idl; simpl; intros; auto. InvBooleans.
+  rewrite valid_interface_id_implies_complete_id; auto.
+Qed.
+
+Fixpoint complete_composite (mcd: composite_definition) : bool :=
   match mcd with
-  | MCDstruct l => complete_mymembervars l
-  | MCDunion l => complete_mymembervars l
-  | MCDclass (Some pid) li l1 l2 ca =>
+  | CDstruct l => complete_membervars l
+  | CDunion l => complete_membervars l
+  | CDclass (Some pid) li l1 l2 ca =>
     valid_superclass_id pid &&
     valid_interface_idlist li &&
-    complete_mymembervars l1 &&
-    complete_mymemberfuncs l2
-  | MCDclass None li l1 l2 ca =>
+    complete_membervars l1 &&
+    complete_memberfuncs l2
+  | CDclass None li l1 l2 ca =>
     valid_interface_idlist li &&
-    complete_mymembervars l1 &&
-    complete_mymemberfuncs l2
-  | MCDinterface li l1 l2 ia =>
-    (ia_abstract ia) &&
+    complete_membervars l1 &&
+    complete_memberfuncs l2
+  | CDinterface li l1 l2 ca =>
+    (ca_abstract ca) &&
+    negb (ca_final ca) &&
     valid_interface_idlist li &&
-    complete_mymembervars l1 &&
-    complete_mymemberfuncs l2
+    complete_membervars l1 &&
+    complete_memberfuncs l2
   end.
 (*
 Lemma complete_member:
@@ -1473,7 +1401,7 @@ End Type_properties.
 *)
 
 Program Definition composite_of_def (ce: composite_env) (id: ident)
-        (mcd: mycomposite_definition) : res composite :=
+        (mcd: composite_definition) : res composite :=
   match ce ! id, complete_composite ce mcd with
   | Some _, _ =>
       Error (MSG "Multiple definitions of struct or union " :: CTX id :: nil)
@@ -1489,16 +1417,16 @@ Program Definition composite_of_def (ce: composite_env) (id: ident)
             co_depth := depthof_composite ce mcd;
             co_superclasses := superclasses_composite ce mcd;
             co_superinterfaces := superinterfaces_composite ce mcd;
-            co_sizeof_pos := _;
+            (*co_sizeof_pos := _;
             co_alignof_two_p := _;
-            co_sizeof_alignof := _ |}
+            co_sizeof_alignof := _;*) |}
   end.
-Next Obligation.
+(*Next Obligation.
 Admitted.
 Next Obligation.
 Admitted.
 Next Obligation.
-Admitted.
+Admitted.*)
 (*
 Next Obligation.
   apply Zle_ge. eapply Zle_trans. eapply sizeof_composite_pos.
@@ -1519,69 +1447,69 @@ Defined.
 
 Section build_composite_env.
 
-Variable te: PTree.t mytype.
+Variable te: PTree.t type.
 
-Fixpoint id_used_by_mytype (mt: mytype) : option ident :=
+Fixpoint id_used_by_type (mt: type) : option ident :=
   match mt with
-  | MTprim _ => None
-  | MTpointer _ => None
-  | MTarray mt _ => id_used_by_mytype mt
-  | MTfunction _ _ => None
-  | MTcomposite id => Some id
+  | Tprim _ => None
+  | Tpointer _ => None
+  | Tarray mt _ => id_used_by_type mt
+  | Tfunction _ _ => None
+  | Tcomposite id => Some id
   end.
 
-(*Fixpoint idlist_used_by_mytypelist (mtl: mytypelist) : list ident :=
+(*Fixpoint idlist_used_by_typelist (mtl: typelist) : list ident :=
   match mtl with
-  | MTnil => nil
-  | MTcons mt mtl' =>
-    match id_used_by_mytype mt with
-    | Some id => id :: idlist_used_by_mytypelist mtl'
-    | None => idlist_used_by_mytypelist mtl'
+  | Tnil => nil
+  | Tcons mt mtl' =>
+    match id_used_by_type mt with
+    | Some id => id :: idlist_used_by_typelist mtl'
+    | None => idlist_used_by_typelist mtl'
     end
   end.*)
 
-Fixpoint idlist_used_by_mymembervars (mmv: mymembervars) : list ident :=
+Fixpoint idlist_used_by_membervars (mmv: membervars) : list ident :=
   match mmv with
-  | MMVnil => nil
-  | MMVcons _ mt _ _ mmv' =>
-    match id_used_by_mytype mt with
-    | Some id => id :: idlist_used_by_mymembervars mmv'
-    | None => idlist_used_by_mymembervars mmv'
+  | MVnil => nil
+  | MVcons _ mt _ _ mmv' =>
+    match id_used_by_type mt with
+    | Some id => id :: idlist_used_by_membervars mmv'
+    | None => idlist_used_by_membervars mmv'
     end
   end.
 
-Definition idlist_used_by_mycomposite_definition (mcd: mycomposite_definition) : list ident :=
+Definition idlist_used_by_composite_definition (mcd: composite_definition) : list ident :=
   match mcd with
-  | MCDstruct mmv => idlist_used_by_mymembervars mmv
-  | MCDunion mmv => idlist_used_by_mymembervars mmv
-  | MCDclass (Some pid) lid mmv _ _ =>
-    pid :: lid ++ idlist_used_by_mymembervars mmv
-  | MCDclass None lid mmv _ _ =>
-    lid ++ idlist_used_by_mymembervars mmv
-  | MCDinterface lid mmv _ _ =>
-    lid ++ idlist_used_by_mymembervars mmv
+  | CDstruct mmv => idlist_used_by_membervars mmv
+  | CDunion mmv => idlist_used_by_membervars mmv
+  | CDclass (Some pid) lid mmv _ _ =>
+    pid :: lid ++ idlist_used_by_membervars mmv
+  | CDclass None lid mmv _ _ =>
+    lid ++ idlist_used_by_membervars mmv
+  | CDinterface lid mmv _ _ =>
+    lid ++ idlist_used_by_membervars mmv
   end.
 
-Definition add_node_edges (g: graph) (x: ident * mycomposite_definition) : graph :=
+Definition add_node_edges (g: graph) (x: ident * composite_definition) : graph :=
   let (id, mcd) := x in
-  fold_left (fun g0 id0 => add_edge g0 id0 id) (idlist_used_by_mycomposite_definition mcd) (add_node g id).
+  fold_left (fun g0 id0 => add_edge g0 id0 id) (idlist_used_by_composite_definition mcd) (add_node g id).
 
-Definition init_graph (l: list (ident * mycomposite_definition)) : graph :=
+Definition init_graph (l: list (ident * composite_definition)) : graph :=
   fold_left add_node_edges l empty_graph.
 
-Definition build_mycomposite_definition_env (l: list (ident * mycomposite_definition)) : PTree.t mycomposite_definition :=
-  fold_left (fun s x => PTree.set (fst x) (snd x) s) l (PTree.empty mycomposite_definition).
+Definition build_composite_definition_env (l: list (ident * composite_definition)) : PTree.t composite_definition :=
+  fold_left (fun s x => PTree.set (fst x) (snd x) s) l (PTree.empty composite_definition).
 
-Fixpoint reorder_mycomposite_definitions
-           (e: PTree.t mycomposite_definition)
+Fixpoint reorder_composite_definitions
+           (e: PTree.t composite_definition)
            (idl: list ident)
-  : res (list (ident * mycomposite_definition)) :=
+  : res (list (ident * composite_definition)) :=
   match idl with
   | nil => OK nil
   | id :: idl' =>
     match e ! id with
     | Some mcd =>
-      match reorder_mycomposite_definitions e idl' with
+      match reorder_composite_definitions e idl' with
       | OK l => OK ((id, mcd) :: l)
       | Error msg => Error msg
       end
@@ -1590,19 +1518,19 @@ Fixpoint reorder_mycomposite_definitions
     end
   end.
 
-Definition toposort (l: list (ident * mycomposite_definition))
-  : res (list (ident * mycomposite_definition)) :=
-  let e := build_mycomposite_definition_env l in
+Definition toposort (l: list (ident * composite_definition))
+  : res (list (ident * composite_definition)) :=
+  let e := build_composite_definition_env l in
   let idl := naive_topological_sort (init_graph l) in
   match Z.compare (list_length_z idl) (list_length_z l) with
-  | Eq => reorder_mycomposite_definitions e idl
+  | Eq => reorder_composite_definitions e idl
   | Lt =>
     Error (MSG "There are loops in class hierarchy" :: nil)
   | Gt =>
     Error (MSG "Error in topological sort!" :: nil)
   end.
 
-Fixpoint add_composite_definitions (ce: composite_env) (l: list (ident * mycomposite_definition)) : res composite_env :=
+Fixpoint add_composite_definitions (ce: composite_env) (l: list (ident * composite_definition)) : res composite_env :=
   match l with
   | nil => OK ce
   | (id, mcd) :: l' =>
@@ -1611,12 +1539,11 @@ Fixpoint add_composite_definitions (ce: composite_env) (l: list (ident * mycompo
   end.
 
 Definition build_composite_env (l: list (ident * composite_definition)) :=
-  do l' <- composite_definitions_to_mycomposite_definitions te l;
-  do l'' <- toposort l';
+  do l'' <- toposort l;
   add_composite_definitions (PTree.empty _) l''.
 
 End build_composite_env.
-(*
+
 (** Stability properties for alignments, sizes, and ranks.  If the type is
   complete in a composite environment [env], its size, alignment, and rank
   are unchanged if we add more definitions to [env]. *)
@@ -1626,92 +1553,258 @@ Section STABILITY.
 Variables env env': composite_env.
 Hypothesis extends: forall id co, env!id = Some co -> env'!id = Some co.
 
-(*Lemma alignof_stable:
-  forall t, complete_mytype env t = true -> alignof env' t = alignof env t.
+Lemma alignof_stable:
+  forall t ta,
+    complete_type env t = true ->
+    alignof env' t ta = alignof env t ta.
 Proof.
   induction t; simpl; intros; f_equal; auto.
-  destruct (env!id) as [co|] eqn:E; try discriminate.
-  erewrite extends by eauto. auto.
+  unfold complete_type, complete_id in H.
   destruct (env!i) as [co|] eqn:E; try discriminate.
   erewrite extends by eauto. auto.
-Qed.*)
+Qed.
 
 Lemma sizeof_stable:
-  forall t, complete_mytype env t = true -> sizeof env' t = sizeof env t.
+  forall t ta,
+    complete_type env t = true ->
+    sizeof env' t ta  = sizeof env t ta.
 Proof.
   induction t; simpl; intros; auto.
   rewrite IHt by auto. auto.
+  unfold complete_type, complete_id in H.
   destruct (env!i) as [co|] eqn:E; try discriminate.
   erewrite extends by eauto. auto.
 Qed.
 
 Lemma complete_type_stable:
-  forall t, complete_mytype env t = true -> complete_mytype env' t = true.
+  forall t,
+    complete_type env t = true ->
+    complete_type env' t = true
+with complete_typelist_stable:
+       forall tl,
+         complete_typelist env tl = true ->
+         complete_typelist env' tl = true.
 Proof.
-  induction t; simpl; intros; auto.
-  destruct (env!i) as [co|] eqn:E; try discriminate.
-  erewrite extends by eauto. auto.
-  destruct (env!i) as [co|] eqn:E; try discriminate.
-  erewrite extends by eauto. auto.
+  - clear complete_type_stable.
+    induction t; simpl; intros; auto.
+    unfold complete_type, complete_typelist in *. InvBooleans.
+    apply complete_typelist_stable in H0.
+    apply complete_typelist_stable in H1.
+    rewrite H0, H1; auto.
+    unfold complete_type, complete_id in *.
+    destruct (env!i) as [co|] eqn:E; try discriminate.
+    erewrite extends by eauto. auto.
+  - clear complete_typelist_stable.
+    induction tl; simpl; intros; auto.
+    unfold complete_type, complete_typelist in *. InvBooleans.
+    apply complete_type_stable in H0.
+    apply IHtl in H1. rewrite H0, H1; auto.
 Qed.
 
 Lemma rank_type_stable:
-  forall t, complete_type env t = true -> rank_type env' t = rank_type env t.
+  forall t,
+    complete_type env t = true ->
+    rank env' t = rank env t.
 Proof.
   induction t; simpl; intros; auto.
+  unfold complete_type, complete_id in H.
   destruct (env!i) as [co|] eqn:E; try discriminate.
   erewrite extends by eauto. auto.
-  destruct (env!i) as [co|] eqn:E; try discriminate.
-  erewrite extends by eauto. auto.
+Qed.
+
+Lemma alignof_membervars_stable:
+  forall mv,
+    complete_membervars env mv = true ->
+    alignof_membervars env' mv = alignof_membervars env mv.
+Proof.
+  induction mv; simpl; intros; auto.
+  InvBooleans. rewrite alignof_stable by auto. rewrite IHmv by auto. auto.
 Qed.
 
 Lemma alignof_composite_stable:
-  forall m, complete_members env m = true -> alignof_composite env' m = alignof_composite env m.
+  forall c,
+    complete_composite env c = true ->
+    alignof_composite env' c = alignof_composite env c.
 Proof.
-  induction m as [|[id t]]; simpl; intros.
-  auto.
-  InvBooleans. rewrite alignof_stable by auto. rewrite IHm by auto. auto.
+  induction c; simpl; intros; auto.
+  - rewrite alignof_membervars_stable; auto.
+  - rewrite alignof_membervars_stable; auto.
+  - destruct o.
+    + InvBooleans. unfold valid_superclass_id in H0.
+      destruct (env!i) eqn: E1; try congruence.
+      erewrite extends; eauto. rewrite alignof_membervars_stable; auto.
+    + InvBooleans. rewrite alignof_membervars_stable; auto.
+  - InvBooleans. rewrite alignof_membervars_stable; auto.
 Qed.
 
-Lemma sizeof_struct_stable:
-  forall m pos, complete_members env m = true -> sizeof_struct env' pos m = sizeof_struct env pos m.
+Lemma sum_sizeof_membervars_stable:
+  forall mv cur,
+    complete_membervars env mv = true ->
+    sum_sizeof_membervars env' mv cur = sum_sizeof_membervars env mv cur.
 Proof.
-  induction m as [|[id t]]; simpl; intros.
-  auto.
-  InvBooleans. rewrite alignof_stable by auto. rewrite sizeof_stable by auto.
-  rewrite IHm by auto. auto.
+  induction mv; simpl; intros; auto. InvBooleans.
+  rewrite alignof_stable; auto. rewrite sizeof_stable; auto.
 Qed.
 
-Lemma sizeof_union_stable:
-  forall m, complete_members env m = true -> sizeof_union env' m = sizeof_union env m.
+Lemma max_sizeof_membervars_stable:
+  forall mv,
+    complete_membervars env mv = true ->
+    max_sizeof_membervars env' mv = max_sizeof_membervars env mv.
 Proof.
-  induction m as [|[id t]]; simpl; intros.
-  auto.
-  InvBooleans. rewrite sizeof_stable by auto. rewrite IHm by auto. auto.
+  induction mv; simpl; intros; auto. InvBooleans.
+  rewrite sizeof_stable; auto. rewrite IHmv; auto.
 Qed.
 
 Lemma sizeof_composite_stable:
-  forall su m, complete_members env m = true -> sizeof_composite env' su m = sizeof_composite env su m.
+  forall c,
+    complete_composite env c = true ->
+    sizeof_composite env' c = sizeof_composite env c.
 Proof.
-  intros. destruct su; simpl.
-  apply sizeof_struct_stable; auto.
-  apply sizeof_union_stable; auto.
+  induction c; simpl; intros; auto.
+  - rewrite sum_sizeof_membervars_stable; auto.
+  - rewrite max_sizeof_membervars_stable; auto.
+  - destruct o.
+    + InvBooleans. unfold valid_superclass_id in H0.
+      destruct (env!i) eqn: E1; try congruence.
+      erewrite extends; eauto. rewrite sum_sizeof_membervars_stable; auto.
+    + InvBooleans. rewrite sum_sizeof_membervars_stable; auto.
+  - InvBooleans. rewrite sum_sizeof_membervars_stable; auto.
 Qed.
 
-Lemma complete_members_stable:
-  forall m, complete_members env m = true -> complete_members env' m = true.
+Lemma complete_membervars_stable:
+  forall mv,
+    complete_membervars env mv = true ->
+    complete_membervars env' mv = true.
 Proof.
-  induction m as [|[id t]]; simpl; intros.
-  auto.
-  InvBooleans. rewrite complete_type_stable by auto. rewrite IHm by auto. auto.
+  induction mv; simpl; intros; auto.
+  InvBooleans. rewrite complete_type_stable by auto. rewrite IHmv by auto. auto.
 Qed.
 
-Lemma rank_members_stable:
-  forall m, complete_members env m = true -> rank_members env' m = rank_members env m.
+Lemma complete_memberfuncs_stable:
+  forall mf,
+    complete_memberfuncs env mf = true ->
+    complete_memberfuncs env' mf = true.
 Proof.
-  induction m as [|[id t]]; simpl; intros.
-  auto.
+  induction mf; simpl; intros; auto.
+  InvBooleans. rewrite complete_type_stable by auto. rewrite IHmf by auto. auto.
+Qed.
+
+Lemma valid_superclass_id_stable:
+  forall id,
+    valid_superclass_id env id = true ->
+    valid_superclass_id env' id = true.
+Proof.
+  unfold valid_superclass_id; intros.
+  destruct (env!id) eqn: E1; try congruence.
+  erewrite extends; eauto.
+Qed.
+
+Lemma valid_interface_id_stable:
+  forall id,
+    valid_interface_id env id = true ->
+    valid_interface_id env' id = true.
+Proof.
+  unfold valid_interface_id; intros.
+  destruct (env!id) eqn: E1; try congruence.
+  erewrite extends; eauto.
+Qed.
+
+Lemma valid_interface_idlist_stable:
+  forall idl,
+    valid_interface_idlist env idl = true ->
+    valid_interface_idlist env' idl = true.
+Proof.
+  induction idl; simpl; intros; auto. InvBooleans.
+  rewrite valid_interface_id_stable; auto.
+Qed.
+
+Lemma complete_composite_stable:
+  forall c,
+    complete_composite env c = true ->
+    complete_composite env' c = true.
+Proof.
+  induction c; simpl; intros; auto.
+  - rewrite complete_membervars_stable; auto.
+  - rewrite complete_membervars_stable; auto.
+  - destruct o.
+    + InvBooleans.
+      rewrite valid_superclass_id_stable; auto.
+      rewrite valid_interface_idlist_stable; auto.
+      rewrite complete_membervars_stable; auto.
+      rewrite complete_memberfuncs_stable; auto.
+    + InvBooleans.
+      rewrite valid_interface_idlist_stable; auto.
+      rewrite complete_membervars_stable; auto.
+      rewrite complete_memberfuncs_stable; auto.
+  - InvBooleans.
+    rewrite H, H4; auto.
+    rewrite valid_interface_idlist_stable; auto.
+    rewrite complete_membervars_stable; auto.
+    rewrite complete_memberfuncs_stable; auto.
+Qed.
+
+Lemma rank_membervars_stable:
+  forall mv,
+    complete_membervars env mv = true ->
+    rank_membervars env' mv = rank_membervars env mv.
+Proof.
+  induction mv; simpl; intros; auto.
   InvBooleans. f_equal; auto. apply rank_type_stable; auto.
+Qed.
+
+Lemma rank_composite_stable:
+  forall c,
+    complete_composite env c = true ->
+    rank_composite env' c = rank_composite env c.
+Proof.
+  induction c; simpl; intros; auto.
+  - rewrite rank_membervars_stable; auto.
+  - rewrite rank_membervars_stable; auto.
+  - destruct o.
+    + InvBooleans. unfold valid_superclass_id in H0.
+      destruct (env!i) eqn: E1; try congruence.
+      erewrite extends; eauto. rewrite rank_membervars_stable; auto.
+    + InvBooleans. rewrite rank_membervars_stable; auto.
+  - InvBooleans. rewrite rank_membervars_stable; auto.
+Qed.
+
+Lemma depthof_id_stable:
+  forall id,
+    complete_id env id = true ->
+    depthof_id env' id = depthof_id env id.
+Proof.
+  unfold complete_id, depthof_id; intros.
+  destruct (env!id) eqn: E1; try congruence.
+  erewrite extends; eauto.
+Qed.
+
+Lemma maxdepthof_idlist_stable:
+  forall idl,
+    complete_idlist env idl = true ->
+    maxdepthof_idlist env' idl = maxdepthof_idlist env idl.
+Proof.
+  induction idl; simpl; intros; auto. InvBooleans.
+  rewrite depthof_id_stable; auto. rewrite IHidl; auto.
+Qed.
+
+Lemma depthof_composite_stable:
+  forall c,
+    complete_composite env c = true ->
+    depthof_composite env' c = depthof_composite env c.
+Proof.
+  induction c; simpl; intros; auto.
+  - destruct o.
+    + InvBooleans.
+      rewrite depthof_id_stable; auto.
+      rewrite maxdepthof_idlist_stable; auto.
+      apply valid_interface_idlist_implies_complete_idlist; auto.
+      apply valid_superclass_id_implies_complete_id; auto.
+    + InvBooleans.
+      rewrite maxdepthof_idlist_stable; auto.
+      apply valid_interface_idlist_implies_complete_idlist; auto.
+  - InvBooleans.
+    rewrite maxdepthof_idlist_stable; auto.
+    apply valid_interface_idlist_implies_complete_idlist; auto.
 Qed.
 
 End STABILITY.
@@ -1725,13 +1818,14 @@ Proof.
 - inv H; auto.
 - destruct a; monadInv H.
   eapply IHdefs; eauto. rewrite PTree.gso; auto.
-  red; intros; subst id0. unfold composite_of_def in EQ. rewrite H0 in EQ; discriminate.
+  red; intros; subst i. unfold composite_of_def in EQ.
+  rewrite H0 in EQ; discriminate.
 Qed.
 
 (** It follows that the sizes and alignments contained in the composite
   environment produced by [build_composite_env] are consistent with
   the sizes and alignments of the members of the composite types. *)
-*)
+
 Record composite_consistent (ce: composite_env) (co: composite) : Prop := {
   co_consistent_complete:
      complete_composite ce (co_def co) = true;
@@ -1751,51 +1845,49 @@ Lemma composite_consistent_stable:
          (EXTENDS: forall id co, env!id = Some co -> env'!id = Some co)
          co,
   composite_consistent env co -> composite_consistent env' co.
-Admitted.
-(*Proof.
+Proof.
   intros. destruct H as [A B C D]. constructor. 
-  eapply complete_members_stable; eauto.
-  symmetry; rewrite B. f_equal. apply alignof_composite_stable; auto. 
+  eapply complete_composite_stable; eauto.
+  symmetry; rewrite B. erewrite alignof_composite_stable; eauto. 
   symmetry; rewrite C. f_equal. apply sizeof_composite_stable; auto.
-  symmetry; rewrite D. apply rank_members_stable; auto.
-Qed.*)
+  symmetry; rewrite D. apply depthof_composite_stable; auto.
+Qed.
 
 Lemma composite_of_def_consistent:
   forall ce id mcd co,
   composite_of_def ce id mcd = OK co ->
   composite_consistent ce co.
-Admitted.
-(*Proof.
+Proof.
   unfold composite_of_def; intros. 
-  destruct (env!id); try discriminate. destruct (complete_members env m) eqn:C; inv H.
+  destruct (ce!id); try discriminate.
+  destruct (complete_composite ce mcd) eqn:C; inv H.
   constructor; auto.
-Qed.*)
+Qed.
 
 Theorem build_composite_env_consistent:
-  forall te defs ce, build_composite_env te defs = OK ce -> composite_env_consistent ce.
-Admitted.
-(*Proof.
+  forall defs ce, build_composite_env defs = OK ce -> composite_env_consistent ce.
+Proof.
   cut (forall defs env0 env,
        add_composite_definitions env0 defs = OK env ->
        composite_env_consistent env0 ->
        composite_env_consistent env).
-  intros. eapply H; eauto. red; intros. rewrite PTree.gempty in H1; discriminate.
+  intros. monadInv H0. eapply H; eauto. red; intros. rewrite PTree.gempty in H0; discriminate.
   induction defs as [|d1 defs]; simpl; intros.
 - inv H; auto.
 - destruct d1; monadInv H.
   eapply IHdefs; eauto.
-  set (env1 := PTree.set id x env0) in *.
-  assert (env0!id = None). 
-  { unfold composite_of_def in EQ. destruct (env0!id). discriminate. auto. }
+  set (env1 := PTree.set i x env0) in *.
+  assert (env0!i = None). 
+  { unfold composite_of_def in EQ. destruct (env0!i). discriminate. auto. }
   assert (forall id1 co1, env0!id1 = Some co1 -> env1!id1 = Some co1).
   { intros. unfold env1. rewrite PTree.gso; auto. congruence. }
   red; intros. apply composite_consistent_stable with env0; auto.
-  unfold env1 in H2; rewrite PTree.gsspec in H2; destruct (peq id0 id).
-+ subst id0. inversion H2; clear H2. subst co.
+  unfold env1 in H2; rewrite PTree.gsspec in H2; destruct (peq id i).
++ subst id. inversion H2; clear H2. subst co.
   eapply composite_of_def_consistent; eauto.
 + eapply H0; eauto. 
 Qed.
-
+(*
 (** Moreover, every composite definition is reflected in the composite environment. *)
 
 Theorem build_composite_env_charact:

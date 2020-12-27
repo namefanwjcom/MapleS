@@ -80,3 +80,8 @@
 .nia.cache
 .nra.cache
 .csdp.cache
+
+# Maple
+test/
+Extraction/
+Maple/backup
