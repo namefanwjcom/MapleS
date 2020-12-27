@@ -23,7 +23,7 @@
 /clightgen.byte
 /tools/ndfun
 /tools/modorder
-/Makefile.config
+#/Makefile.config
 /.merlin
 /_CoqProject
 /compile.pl
